@@ -5,15 +5,29 @@ import numpy as np
 import pytest
 import time
 from pathlib import Path
+
 from src.core import Frame, ROI
 from src.capture import ThreadedCamera, CameraConfig, FramePreprocessor, PreprocessConfig
 
 
 def test_camera_config():
     """Test CameraConfig dataclass."""
-    config = CameraConfig(index=0, width=640, height=480, fps=30)
-    assert config.index == 0
+    # Test with camera index
+    config = CameraConfig(source=0, width=640, height=480, fps=30)
+    assert config.source == 0
     assert config.width == 640
+    assert not config.is_video_file()
+
+
+def test_camera_config_video():
+    """Test CameraConfig with video file path."""
+    # Test with string path
+    config = CameraConfig(source="videos/test.mp4")
+    assert config.source == "videos/test.mp4"
+
+    # Test with Path object
+    config2 = CameraConfig(source=Path("videos/test.mp4"))
+    assert isinstance(config2.source, str)
 
 
 def test_preprocessor_downscale():
@@ -80,13 +94,30 @@ def test_preprocessor_clahe():
     assert processed.image.shape == img.shape
 
 
-# Note: ThreadedCamera tests require actual camera hardware
+def test_preprocessor_set_roi():
+    """Test ROI setter methods."""
+    preprocessor = FramePreprocessor()
+
+    # Initially no ROI
+    assert preprocessor.config.roi is None
+
+    # Set ROI
+    roi = ROI(x=50, y=50, width=100, height=100)
+    preprocessor.set_roi(roi)
+    assert preprocessor.config.roi == roi
+
+    # Clear ROI
+    preprocessor.clear_roi()
+    assert preprocessor.config.roi is None
+
+
+# Note: ThreadedCamera tests require actual camera hardware or video files
 # For CI/CD, these would be mocked or skipped
 
-@pytest.mark.skipif(True, reason="Requires camera hardware")
+@pytest.mark.skipif(True, reason="Requires camera hardware or video file")
 def test_threaded_camera_start_stop():
     """Test camera start/stop (requires hardware)."""
-    camera = ThreadedCamera(queue_size=3)
+    camera = ThreadedCamera(CameraConfig(source=0), queue_size=3)
 
     # Start
     started = camera.start()
@@ -105,38 +136,12 @@ def test_threaded_camera_start_stop():
     assert not camera.is_running
 
 
-def test_camera_config_video():
-    """Test CameraConfig with video file."""
-    # Create dummy video file for testing
-    import tempfile
-    import os
-
-    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
-        video_path = f.name
-
-    try:
-        # Test with Path
-        config = CameraConfig(source=Path(video_path))
-        assert isinstance(config.source, str)
-
-        # Test is_video_file (won't work as file is empty, but tests the method)
-        # In real scenario with actual video file:
-        # assert config.is_video_file()
-    finally:
-        os.unlink(video_path)
-
-
-def test_camera_config_camera_index():
-    """Test CameraConfig with camera index."""
-    config = CameraConfig(source=0)
-    assert config.source == 0
-    assert not config.is_video_file()
-
-
 if __name__ == "__main__":
     print("Running capture module tests...")
     test_camera_config()
     print("✓ CameraConfig test passed")
+    test_camera_config_video()
+    print("✓ CameraConfig video test passed")
     test_preprocessor_downscale()
     print("✓ Downscale test passed")
     test_preprocessor_grayscale()
@@ -145,4 +150,6 @@ if __name__ == "__main__":
     print("✓ ROI test passed")
     test_preprocessor_clahe()
     print("✓ CLAHE test passed")
+    test_preprocessor_set_roi()
+    print("✓ ROI setter test passed")
     print("\n✓ All capture tests passed!")
