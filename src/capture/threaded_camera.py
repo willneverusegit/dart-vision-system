@@ -1,13 +1,14 @@
 """
 Threaded camera capture with bounded queue and graceful frame dropping.
-Prevents I/O blocking and ensures real-time performance.
+Supports both live camera and video files.
 """
 import cv2
 import threading
 import queue
 import time
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
+from pathlib import Path
 from dataclasses import dataclass
 
 from src.core import Frame
@@ -17,12 +18,22 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CameraConfig:
-    """Configuration for camera capture."""
-    index: int = 0
+    """Configuration for camera/video capture."""
+    source: Union[int, str, Path] = 0  # Camera index or video file path
     width: int = 1280
     height: int = 720
     fps: int = 30
     backend: str = "any"  # "any", "dshow", "msmf" (Windows)
+    loop_video: bool = True  # Loop video files when reaching end
+
+    def __post_init__(self):
+        """Convert Path to string."""
+        if isinstance(self.source, Path):
+            self.source = str(self.source)
+
+    def is_video_file(self) -> bool:
+        """Check if source is a video file (vs camera)."""
+        return isinstance(self.source, str) and Path(self.source).exists()
 
     def get_backend_flag(self) -> int:
         """Convert backend string to OpenCV flag."""
@@ -36,25 +47,26 @@ class CameraConfig:
 
 class ThreadedCamera:
     """
-    Asynchronous camera capture using producer/consumer pattern.
+    Asynchronous camera/video capture using producer/consumer pattern.
+
+    Supports:
+    - Live camera capture (source = camera index)
+    - Video file playback (source = file path)
 
     Features:
     - Runs capture in separate thread to avoid I/O blocking
     - Bounded queue with graceful frame dropping when processing is slow
     - Automatic FPS measurement
+    - Video looping for continuous testing
     - Thread-safe start/stop
 
-    Example:
-        camera = ThreadedCamera(queue_size=3)
+    Example (Camera):
+        camera = ThreadedCamera(CameraConfig(source=0))
         camera.start()
 
-        while True:
-            frame = camera.read()
-            if frame is None:
-                break
-            # Process frame...
-
-        camera.stop()
+    Example (Video):
+        camera = ThreadedCamera(CameraConfig(source="videos/test.mp4"))
+        camera.start()
     """
 
     def __init__(
@@ -63,10 +75,10 @@ class ThreadedCamera:
             queue_size: int = 3
     ):
         """
-        Initialize threaded camera.
+        Initialize threaded camera/video capture.
 
         Args:
-            config: Camera configuration (default: CameraConfig())
+            config: Camera/video configuration (default: CameraConfig())
             queue_size: Max frames in queue (smaller = lower latency)
         """
         self.config = config or CameraConfig()
@@ -88,62 +100,82 @@ class ThreadedCamera:
         self._last_fps_time = time.time()
         self._current_fps: float = 0.0
 
+        # Video-specific
+        self._is_video_file = self.config.is_video_file()
+        self._video_frame_count = 0
+        self._video_total_frames = 0
+
         # State
         self._is_running = False
 
     def start(self) -> bool:
         """
-        Start camera capture thread.
+        Start camera/video capture thread.
 
         Returns:
             True if started successfully, False otherwise
         """
         if self._is_running:
-            logger.warning("Camera already running")
+            logger.warning("Capture already running")
             return True
 
-        # Open camera
-        backend = self.config.get_backend_flag()
-        self._capture = cv2.VideoCapture(self.config.index, backend)
+        # Open camera or video file
+        if self._is_video_file:
+            self._capture = cv2.VideoCapture(str(self.config.source))
+            source_name = Path(self.config.source).name
+        else:
+            backend = self.config.get_backend_flag()
+            self._capture = cv2.VideoCapture(self.config.source, backend)
+            source_name = f"Camera {self.config.source}"
 
         if not self._capture.isOpened():
-            logger.error(f"Failed to open camera {self.config.index}")
+            logger.error(f"Failed to open {source_name}")
             return False
 
-        # Set camera properties
-        self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
-        self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
-        self._capture.set(cv2.CAP_PROP_FPS, self.config.fps)
+        # Set camera properties (only for cameras, not video files)
+        if not self._is_video_file:
+            self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
+            self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
+            self._capture.set(cv2.CAP_PROP_FPS, self.config.fps)
 
-        # Log actual camera properties
+        # Get actual properties
         actual_width = int(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_height = int(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = int(self._capture.get(cv2.CAP_PROP_FPS))
 
-        logger.info(
-            f"Camera opened: {actual_width}x{actual_height} @ {actual_fps} FPS "
-            f"(requested: {self.config.width}x{self.config.height} @ {self.config.fps} FPS)"
-        )
+        # Video-specific info
+        if self._is_video_file:
+            self._video_total_frames = int(self._capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            logger.info(
+                f"Video opened: {source_name} - "
+                f"{actual_width}x{actual_height} @ {actual_fps} FPS - "
+                f"{self._video_total_frames} frames total"
+            )
+        else:
+            logger.info(
+                f"Camera opened: {actual_width}x{actual_height} @ {actual_fps} FPS "
+                f"(requested: {self.config.width}x{self.config.height} @ {self.config.fps} FPS)"
+            )
 
         # Start capture thread
         self._stop_event.clear()
         self._capture_thread = threading.Thread(
             target=self._capture_loop,
             daemon=True,
-            name="CameraCapture"
+            name="CameraCapture" if not self._is_video_file else "VideoCapture"
         )
         self._capture_thread.start()
 
         self._is_running = True
-        logger.info("Camera capture thread started")
+        logger.info(f"{'Video' if self._is_video_file else 'Camera'} capture thread started")
         return True
 
     def stop(self) -> None:
-        """Stop camera capture thread and release resources."""
+        """Stop capture thread and release resources."""
         if not self._is_running:
             return
 
-        logger.info("Stopping camera capture...")
+        logger.info("Stopping capture...")
 
         # Signal thread to stop
         self._stop_event.set()
@@ -152,7 +184,7 @@ class ThreadedCamera:
         if self._capture_thread:
             self._capture_thread.join(timeout=2.0)
 
-        # Release camera
+        # Release camera/video
         if self._capture:
             self._capture.release()
             self._capture = None
@@ -166,7 +198,7 @@ class ThreadedCamera:
 
         self._is_running = False
         logger.info(
-            f"Camera stopped. Stats: {self._frame_counter} frames captured, "
+            f"Capture stopped. Stats: {self._frame_counter} frames captured, "
             f"{self._dropped_frames} frames dropped"
         )
 
@@ -191,16 +223,29 @@ class ThreadedCamera:
 
         while not self._stop_event.is_set():
             if not self._capture or not self._capture.isOpened():
-                logger.error("Camera disconnected")
+                logger.error("Capture source disconnected")
                 break
 
             # Read frame
             ret, image = self._capture.read()
 
+            # Handle video end
             if not ret or image is None:
-                logger.warning("Failed to read frame")
-                time.sleep(0.01)  # Brief pause before retry
-                continue
+                if self._is_video_file and self.config.loop_video:
+                    # Loop video
+                    logger.debug("Video ended, looping...")
+                    self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    self._video_frame_count = 0
+                    continue
+                else:
+                    logger.warning("Failed to read frame or video ended")
+                    if not self._is_video_file:
+                        time.sleep(0.01)  # Brief pause before retry
+                    continue
+
+            # Track video progress
+            if self._is_video_file:
+                self._video_frame_count += 1
 
             # Create Frame object
             frame = Frame(
@@ -247,8 +292,13 @@ class ThreadedCamera:
 
     @property
     def is_running(self) -> bool:
-        """Check if camera is currently running."""
+        """Check if capture is currently running."""
         return self._is_running
+
+    @property
+    def is_video(self) -> bool:
+        """Check if source is a video file."""
+        return self._is_video_file
 
     @property
     def fps(self) -> float:
@@ -260,22 +310,41 @@ class ThreadedCamera:
         """Get total dropped frames."""
         return self._dropped_frames
 
-    def get_camera_properties(self) -> dict:
+    @property
+    def video_progress(self) -> Optional[Tuple[int, int]]:
         """
-        Get actual camera properties.
+        Get video playback progress.
 
         Returns:
-            Dictionary with camera properties
+            (current_frame, total_frames) or None if not a video
+        """
+        if not self._is_video_file:
+            return None
+        return (self._video_frame_count, self._video_total_frames)
+
+    def get_capture_properties(self) -> dict:
+        """
+        Get actual capture properties.
+
+        Returns:
+            Dictionary with capture properties
         """
         if not self._capture:
             return {}
 
-        return {
+        props = {
             "width": int(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
             "height": int(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             "fps": int(self._capture.get(cv2.CAP_PROP_FPS)),
             "backend": self._capture.getBackendName(),
+            "is_video": self._is_video_file,
         }
+
+        if self._is_video_file:
+            props["total_frames"] = self._video_total_frames
+            props["current_frame"] = self._video_frame_count
+
+        return props
 
     def __enter__(self):
         """Context manager support."""

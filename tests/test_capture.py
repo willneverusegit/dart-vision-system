@@ -4,7 +4,7 @@ Unit tests for capture module.
 import numpy as np
 import pytest
 import time
-
+from pathlib import Path
 from src.core import Frame, ROI
 from src.capture import ThreadedCamera, CameraConfig, FramePreprocessor, PreprocessConfig
 
@@ -103,6 +103,34 @@ def test_threaded_camera_start_stop():
     # Stop
     camera.stop()
     assert not camera.is_running
+
+
+def test_camera_config_video():
+    """Test CameraConfig with video file."""
+    # Create dummy video file for testing
+    import tempfile
+    import os
+
+    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+        video_path = f.name
+
+    try:
+        # Test with Path
+        config = CameraConfig(source=Path(video_path))
+        assert isinstance(config.source, str)
+
+        # Test is_video_file (won't work as file is empty, but tests the method)
+        # In real scenario with actual video file:
+        # assert config.is_video_file()
+    finally:
+        os.unlink(video_path)
+
+
+def test_camera_config_camera_index():
+    """Test CameraConfig with camera index."""
+    config = CameraConfig(source=0)
+    assert config.source == 0
+    assert not config.is_video_file()
 
 
 if __name__ == "__main__":

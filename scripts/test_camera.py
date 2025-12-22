@@ -1,19 +1,28 @@
 """
-Live camera test script.
+Live camera/video test script.
 Tests threaded capture and preprocessing with real-time display.
 
 Usage:
+    # Camera mode (default)
     python scripts/test_camera.py
+
+    # Video mode
+    python scripts/test_camera.py --video videos/test.mp4
+    python scripts/test_camera.py -v videos/test.mp4
+
+    # Specify camera index
+    python scripts/test_camera.py --camera 1
 
 Controls:
     - 'q': Quit
     - 'g': Toggle grayscale
     - 'c': Toggle CLAHE
-    - 'r': Reset ROI
     - 's': Save current frame
+    - 'SPACE': Pause/Resume (video only)
 """
 import cv2
 import sys
+import argparse
 from pathlib import Path
 
 # Add project root to path
@@ -31,24 +40,91 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Test threaded camera/video capture",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python scripts/test_camera.py                    # Use camera 0
+  python scripts/test_camera.py --camera 1         # Use camera 1
+  python scripts/test_camera.py -v videos/test.mp4 # Use video file
+        """
+    )
+
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument(
+        "-c", "--camera",
+        type=int,
+        default=None,
+        help="Camera index (default: 0)"
+    )
+    source_group.add_argument(
+        "-v", "--video",
+        type=str,
+        default=None,
+        help="Video file path"
+    )
+
+    parser.add_argument(
+        "--no-loop",
+        action="store_true",
+        help="Don't loop video (exit when finished)"
+    )
+
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=1280,
+        help="Camera resolution width (default: 1280)"
+    )
+
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=720,
+        help="Camera resolution height (default: 720)"
+    )
+
+    return parser.parse_args()
+
+
 def main():
-    """Run live camera test."""
+    """Run live camera/video test."""
+    args = parse_args()
+
+    # Determine source
+    if args.video:
+        source = Path(args.video)
+        if not source.exists():
+            logger.error(f"Video file not found: {source}")
+            return
+        source_str = f"Video: {source.name}"
+    else:
+        source = args.camera if args.camera is not None else 0
+        source_str = f"Camera {source}"
+
     print("=" * 60)
-    print("Threaded Camera Test")
+    print("Threaded Capture Test")
+    print(f"Source: {source_str}")
     print("=" * 60)
     print("Controls:")
-    print("  'q' - Quit")
-    print("  'g' - Toggle grayscale")
-    print("  'c' - Toggle CLAHE")
-    print("  's' - Save frame")
+    print("  'q'     - Quit")
+    print("  'g'     - Toggle grayscale")
+    print("  'c'     - Toggle CLAHE")
+    print("  's'     - Save frame")
+    if args.video:
+        print("  'SPACE' - Pause/Resume")
     print("=" * 60)
 
-    # Configure camera
+    # Configure camera/video
     cam_config = CameraConfig(
-        index=0,
-        width=1280,
-        height=720,
-        fps=30
+        source=source,
+        width=args.width,
+        height=args.height,
+        fps=30,
+        loop_video=not args.no_loop
     )
 
     # Configure preprocessor
@@ -65,20 +141,34 @@ def main():
 
     # Start camera
     if not camera.start():
-        logger.error("Failed to start camera")
+        logger.error("Failed to start capture")
         return
 
-    print(f"\nCamera properties: {camera.get_camera_properties()}")
-    print("Camera started. Press 'q' to quit.\n")
+    print(f"\nCapture properties: {camera.get_capture_properties()}")
+    print("Capture started. Press 'q' to quit.\n")
 
     frame_count = 0
+    paused = False
 
     try:
         while True:
+            # Handle pause (video only)
+            if paused:
+                key = cv2.waitKey(100) & 0xFF
+                if key == ord(' '):
+                    paused = False
+                    print("Resumed")
+                elif key == ord('q'):
+                    break
+                continue
+
             # Read frame
             frame = camera.read(timeout=1.0)
 
             if frame is None:
+                if camera.is_video and not cam_config.loop_video:
+                    logger.info("Video finished")
+                    break
                 logger.warning("No frame received")
                 continue
 
@@ -92,8 +182,9 @@ def main():
             if len(display_img.shape) == 2:
                 display_img = cv2.cvtColor(display_img, cv2.COLOR_GRAY2BGR)
 
-            # Add info text
+            # Build info text
             info_text = [
+                f"Source: {source_str}",
                 f"FPS: {camera.fps:.1f}",
                 f"Frame: {frame.frame_id}",
                 f"Size: {processed.shape}",
@@ -102,6 +193,15 @@ def main():
                 f"CLAHE: {'ON' if preproc_config.apply_clahe else 'OFF'}",
             ]
 
+            # Add video progress
+            if camera.is_video:
+                progress = camera.video_progress
+                if progress:
+                    current, total = progress
+                    percentage = (current / total * 100) if total > 0 else 0
+                    info_text.append(f"Progress: {current}/{total} ({percentage:.1f}%)")
+
+            # Draw info
             y_offset = 30
             for text in info_text:
                 cv2.putText(
@@ -116,7 +216,7 @@ def main():
                 y_offset += 25
 
             # Show frame
-            cv2.imshow("Camera Test", display_img)
+            cv2.imshow("Capture Test", display_img)
 
             # Handle keyboard
             key = cv2.waitKey(1) & 0xFF
@@ -142,6 +242,10 @@ def main():
                 filename = f"frame_{frame_count:04d}.png"
                 cv2.imwrite(filename, processed.image)
                 print(f"Saved: {filename}")
+
+            elif key == ord(' ') and camera.is_video:
+                paused = True
+                print("Paused (press SPACE to resume)")
 
             frame_count += 1
 
