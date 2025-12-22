@@ -50,16 +50,33 @@ def test_angle_to_sector():
     """Test angle to sector mapping."""
     mapper = DartboardMapper()
 
+    # Sector layout (each 18° wide):
+    # Sector 20: centered at 0°, range [-9°, 9°)
+    # Sector 1:  centered at 18°, range [9°, 27°)
+    # Sector 18: centered at 36°, range [27°, 45°)
+    # Sector 4:  centered at 54°, range [45°, 63°)
+
     # Test sector 20 (top, centered at 0°)
     assert mapper.angle_to_sector(0) == 20
     assert mapper.angle_to_sector(5) == 20
+    assert mapper.angle_to_sector(8) == 20
 
     # Test sector 1 (after 20, clockwise)
+    assert mapper.angle_to_sector(9) == 1
     assert mapper.angle_to_sector(18) == 1
-    assert mapper.angle_to_sector(27) == 1
+    assert mapper.angle_to_sector(26) == 1
 
-    # Test sector 18
+    # Test sector 18 (after 1)
+    assert mapper.angle_to_sector(27) == 18
     assert mapper.angle_to_sector(36) == 18
+
+    # Test sector 4 (after 18)
+    assert mapper.angle_to_sector(45) == 4
+    assert mapper.angle_to_sector(54) == 4
+
+    # Test wrapping (sector 5 is last, then wraps to 20)
+    assert mapper.angle_to_sector(351) == 20  # Just before 0°
+    assert mapper.angle_to_sector(359) == 20
 
 
 def test_radius_to_ring():

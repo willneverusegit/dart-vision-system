@@ -80,7 +80,7 @@ class DartboardMapper:
         # Angle (convert from standard math angle to dartboard angle)
         # Math: 0° = right, counter-clockwise
         # Dartboard: 0° = top, clockwise
-        angle_rad = np.arctan2(dy, dx)  # -π to π
+        angle_rad = np.arctan2(-dy, dx)  # -π to π
         angle_deg = np.degrees(angle_rad)  # -180 to 180
 
         # Convert to dartboard convention:
