@@ -189,6 +189,8 @@ def capture_frame(camera):
     print("Live Preview - Press SPACE to capture, 'q' to quit")
     print("=" * 60 + "\n")
 
+    captured_frame = None
+
     while True:
         frame = camera.read(timeout=1.0)
 
@@ -214,11 +216,17 @@ def capture_frame(camera):
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord(' '):
-            cv2.destroyWindow("Capture Frame")
-            return frame
+            captured_frame = frame
+            break
         elif key == ord('q'):
-            cv2.destroyWindow("Capture Frame")
-            return None
+            break
+
+    cv2.destroyWindow("Capture Frame")
+
+    # ← NEU: Camera sofort stoppen nach Capture
+    camera.stop()
+
+    return captured_frame
 
 
 def main():
@@ -253,7 +261,7 @@ def main():
 
     try:
         # Capture frame for calibration
-        frame = capture_frame(camera)
+        frame = capture_frame(camera)  # ← Stoppt jetzt intern die Camera
 
         if frame is None:
             print("Calibration cancelled")
@@ -306,7 +314,7 @@ def main():
         logger.error(f"Calibration error: {e}", exc_info=True)
 
     finally:
-        camera.stop()
+        # Camera is already stopped in capture_frame
         cv2.destroyAllWindows()
 
 

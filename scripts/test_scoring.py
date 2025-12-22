@@ -217,7 +217,10 @@ def main():
         # Capture from camera/video
         source = args.video if args.video else (args.camera if args.camera is not None else 0)
 
-        cam_config = CameraConfig(source=source, loop_video=False)
+        cam_config = CameraConfig(
+            source=source,
+            loop_video=True
+        )
         camera = ThreadedCamera(config=cam_config)
 
         if not camera.start():
@@ -226,16 +229,24 @@ def main():
 
         logger.info("Capturing frame... Press SPACE")
 
-        while True:
+        source_image = None
+        while source_image is None:
             frame = camera.read(timeout=1.0)
             if frame is None:
                 continue
 
             cv2.imshow("Capture (press SPACE)", frame.image)
-            if cv2.waitKey(1) & 0xFF == ord(' '):
-                source_image = frame.image
-                break
+            key = cv2.waitKey(1) & 0xFF
 
+            if key == ord(' '):
+                source_image = frame.image
+            elif key == ord('q'):
+                logger.info("Capture cancelled")
+                camera.stop()
+                cv2.destroyAllWindows()
+                return
+
+        # ← NEU: Camera stoppen nach Capture
         camera.stop()
         cv2.destroyAllWindows()
     else:
@@ -244,7 +255,7 @@ def main():
         cv2.circle(source_image, (400, 400), 300, (255, 255, 255), 2)
         logger.info("Using synthetic test image")
 
-    # Run tester
+    # Run tester (Camera ist jetzt gestoppt, kein Frame-Dropping mehr)
     tester = ScoringTester(calib_data, source_image)
     tester.run()
 

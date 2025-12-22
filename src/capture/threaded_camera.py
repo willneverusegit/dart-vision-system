@@ -108,6 +108,10 @@ class ThreadedCamera:
         # State
         self._is_running = False
 
+        # ← NEU: Für Log-Throttling
+        self._consecutive_read_failures = 0
+        self._last_failure_log_time = 0.0
+
     def start(self) -> bool:
         """
         Start camera/video capture thread.
@@ -231,17 +235,38 @@ class ThreadedCamera:
 
             # Handle video end
             if not ret or image is None:
+                self._consecutive_read_failures += 1
+
                 if self._is_video_file and self.config.loop_video:
                     # Loop video
-                    logger.debug("Video ended, looping...")
+                    current_time = time.time()
+                    # Log only first failure or once per second
+                    if (self._consecutive_read_failures == 1 or
+                            current_time - self._last_failure_log_time > 1.0):
+                        logger.debug("Video ended, looping...")
+                        self._last_failure_log_time = current_time
+
                     self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     self._video_frame_count = 0
+                    time.sleep(0.01)  # Brief pause before retry
                     continue
                 else:
-                    logger.warning("Failed to read frame or video ended")
+                    # Log warning only once or every 100 failures
+                    if self._consecutive_read_failures == 1 or self._consecutive_read_failures % 100 == 0:
+                        logger.warning(
+                            f"Failed to read frame or video ended "
+                            f"({self._consecutive_read_failures} consecutive failures)"
+                        )
+
                     if not self._is_video_file:
                         time.sleep(0.01)  # Brief pause before retry
+                    else:
+                        # Video ended and not looping - stop trying
+                        time.sleep(0.1)  # Longer pause to avoid CPU spin
                     continue
+
+            # Successful read - reset failure counter
+            self._consecutive_read_failures = 0
 
             # Track video progress
             if self._is_video_file:
