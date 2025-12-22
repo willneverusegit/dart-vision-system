@@ -1,5 +1,9 @@
 # Dart Vision System
 
+![Python](https://img.shields.io/badge/python-3.11-blue.svg)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.8+-green.svg)
+![Status](https://img.shields.io/badge/status-in%20development-yellow.svg)
+
 Automatic dart detection and scoring system using Computer Vision.
 
 ## Setup
