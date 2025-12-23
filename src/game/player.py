@@ -37,7 +37,7 @@ class Player:
             hit: Hit to add
 
         Returns:
-            True if turn should continue, False if complete
+            True if turn should continue, False if complete (3 darts)
         """
         # Get current turn (create if needed)
         if not self.turn_history or len(self.turn_history[-1]) >= 3:
@@ -49,12 +49,15 @@ class Player:
         self.darts_thrown += 1
 
         # Check if turn is complete (3 darts)
+        # Return False to signal turn is complete
         return len(current_turn) < 3
 
     def get_current_turn(self) -> List[Hit]:
-        """Get hits in current turn."""
-        if not self.turn_history or len(self.turn_history[-1]) >= 3:
+        """Get hits in current (incomplete or just-completed) turn."""
+        if not self.turn_history:
             return []
+
+        # ← GEÄNDERT: Gibt auch volle Turns zurück (für finalization)
         return self.turn_history[-1]
 
     def get_current_turn_score(self) -> int:
