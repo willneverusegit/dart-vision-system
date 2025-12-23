@@ -266,10 +266,27 @@ class GameScreen(ttk.Frame):
         self.visualizer = visualizer
         self.hit_detector = hit_detector
 
+        # ← NEU: ROI and Preprocessing
+        from src.core import ROIExtractor, PreprocessingPipeline
+
+        self.roi_extractor = ROIExtractor(
+            calibration=calibration,
+            margin_px=50,
+            target_size=800
+        )
+
+        self.preprocessing = PreprocessingPipeline(
+            roi_extractor=None,  # ROI wird manuell angewendet
+            target_width=None,  # Keine extra downscaling in GUI
+            enable_grayscale=False,  # GUI braucht Farbe
+            enable_clahe=False
+        )
+
         # State
         self.running = False
         self.current_frame = None
         self.status_message = ""
+        self.last_update_time = time.time()
 
         self._create_widgets()
         self._start_update_loop()
@@ -410,12 +427,24 @@ class GameScreen(ttk.Frame):
     def _start_update_loop(self):
         """Start UI update loop."""
         self.running = True
+        self.last_update_time = time.time()  # ← NEU: Track update timing
         self._update()
 
     def _update(self):
         """Update UI (called periodically)."""
         if not self.running:
             return
+
+        # ← NEU: Adaptive frame rate (target 15 FPS for GUI, not 30)
+        current_time = time.time()
+        elapsed = current_time - self.last_update_time
+
+        # Only update if enough time has passed (15 FPS = 66ms)
+        if elapsed < 0.066:
+            self.after(10, self._update)  # Check again soon
+            return
+
+        self.last_update_time = current_time
 
         # Update board view
         self._update_board()
@@ -429,8 +458,8 @@ class GameScreen(ttk.Frame):
             if hit:
                 self._process_hit(hit)
 
-        # Schedule next update
-        self.after(33, self._update)  # ~30 FPS
+        # Schedule next update (15 FPS = 66ms)
+        self.after(66, self._update)
 
     def _update_board(self):
         """Update board visualization."""
@@ -439,23 +468,32 @@ class GameScreen(ttk.Frame):
         if frame is None:
             return
 
-        # Warp to calibrated view
-        warped = cv2.warpPerspective(
+        # ← NEU: Warp with ROI-aware approach
+        # Option 1: Warp full frame then extract ROI
+        warped_full = cv2.warpPerspective(
             frame.image,
             self.calib.homography_matrix,
             (800, 800)
         )
 
-        # Store for detection
-        self.current_frame = type('Frame', (), {
-            'image': warped,
-            'frame_id': frame.frame_id,
-            'timestamp': frame.timestamp,
-            'fps': frame.fps
-        })()
+        # For detection: use ROI
+        if self.input_mode == "auto" and self.hit_detector:
+            # Extract ROI for faster detection
+            warped_roi, roi = self.roi_extractor.extract_roi(warped_full)
+
+            # Create detection frame with ROI
+            self.current_frame = type('Frame', (), {
+                'image': warped_roi,
+                'frame_id': frame.frame_id,
+                'timestamp': frame.timestamp,
+                'fps': frame.fps
+            })()
+
+        # For display: use full warped
+        display = warped_full
 
         # Draw overlay
-        display = self.visualizer.draw_board_overlay(warped)
+        display = self.visualizer.draw_board_overlay(display)
 
         # Draw current turn hits
         player = self.game_state.get_current_player()

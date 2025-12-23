@@ -294,7 +294,7 @@ class ThreadedCamera:
                     self._frame_queue.put_nowait(frame)  # Add new
                     self._dropped_frames += 1
 
-                    if self._dropped_frames % 10 == 0:
+                    if self._dropped_frames % 100 == 0:
                         logger.warning(
                             f"Frame dropping active ({self._dropped_frames} total). "
                             "Processing too slow!"

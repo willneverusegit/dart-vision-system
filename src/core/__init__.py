@@ -1,5 +1,5 @@
 """
-Core module - shared types and utilities.
+Core module - shared data types, utilities, and configuration.
 """
 from .types import (
     Frame,
@@ -7,26 +7,36 @@ from .types import (
     CalibrationData,
     BoardGeometry,
     Hit,
-    GameState
+    GameState,
 )
 from .io_utils import (
     atomic_write_yaml,
     load_yaml,
     ensure_config_dir,
-    backup_config
+    backup_config,
 )
+from .roi_utils import (
+    ROIExtractor,
+    PreprocessingPipeline,
+)
+from .config_loader import Config  # ← NEW
 
 __all__ = [
-    # Data types
+    # Types
     "Frame",
     "ROI",
     "CalibrationData",
     "BoardGeometry",
     "Hit",
     "GameState",
-    # I/O utilities
+    # I/O
     "atomic_write_yaml",
     "load_yaml",
     "ensure_config_dir",
     "backup_config",
+    # ROI
+    "ROIExtractor",
+    "PreprocessingPipeline",
+    # Config
+    "Config",  # ← NEW
 ]

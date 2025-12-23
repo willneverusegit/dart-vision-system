@@ -1,91 +1,79 @@
-# Default configuration for dart vision system
-# This file serves as template - actual config will be in calib.yaml
+# Dart Vision System Configuration
 
-# Camera settings
 camera:
-  index: 0  # Camera device index (0 = default webcam)
-  resolution:
-    width: 1280  # Target width after downscaling
-    height: 720  # Target height after downscaling
-  fps: 30  # Target frames per second
-  backend: "any"  # OpenCV backend: "any", "dshow", "msmf" (Windows), "v4l2" (Linux)
+  index: 0
+  width: 1280
+  height: 720
+  fps: 30
 
-# Capture/ROI settings
+# ← NEU: Performance settings
+performance:
+  # ROI settings
+  enable_roi: true
+  roi_margin_px: 50  # Extra margin around board
+
+  # Preprocessing
+  enable_downscale: true
+  target_width: 640  # Downscale to this width (null = no downscaling)
+
+  # Frame rate control
+  enable_fps_limit: false
+  target_fps: 15  # Limit to this FPS (for battery saving)
+
+  # Detection optimization
+  detection_mode: "adaptive"  # "always", "motion_gated", "adaptive"
+
 capture:
-  queue_size: 3  # Max frames in queue (for graceful frame dropping)
-  preprocessing:
-    enable_downscale: true
-    target_width: 1280  # Downscale to this width (maintains aspect ratio)
-    convert_grayscale: false  # true = 3x speedup, but loses color info
-    apply_clahe: false  # Contrast enhancement for poor lighting
-    clahe_clip_limit: 2.0
-    clahe_tile_grid_size: [8, 8]
+  queue_size: 3
+  enable_preprocessing: true
 
-# ROI (Region of Interest) - populated during setup
 roi:
-  x: null  # Will be set during calibration
-  y: null
-  width: null
-  height: null
+  enable: true
+  margin: 50
 
-# Calibration data - populated during calibration
 calibration:
-  method: null  # "charuco", "manual", "aruco"
-  homography_matrix: null  # 3x3 matrix as nested list
-  board_center: [null, null]  # [x, y] in warped space
-  mm_per_pixel: null  # Scaling factor
-  board_radius_px: null  # Outer ring radius
-  timestamp: null
+  method: "manual"  # or "charuco"
+  charuco:
+    squares_x: 5
+    squares_y: 7
+    square_length: 40
+    marker_length: 30
 
-# Board geometry (official dartboard dimensions in mm)
-board:
+board_geometry:
+  # All measurements in mm (official dartboard)
   inner_bull_radius: 6.35
   outer_bull_radius: 15.9
   triple_inner_radius: 99.0
   triple_outer_radius: 107.0
   double_inner_radius: 162.0
   double_outer_radius: 170.0
-  num_sectors: 20
   sector_angle: 18.0
-  reference_angle: 0.0  # Rotation offset if '20' is not at top
 
-# Motion detection (MOG2 background subtraction)
 motion_detection:
-  enable: true
-  history: 500  # Number of frames for background model
-  var_threshold: 16  # Threshold for detection (lower = more sensitive)
-  detect_shadows: false  # Shadow detection (slower)
-  learning_rate: -1  # Automatic learning rate
+  history: 500
+  var_threshold: 16.0
+  detect_shadows: false
+  min_motion_area: 50
+  enable_morphology: true
+  morph_kernel_size: 3
 
-# Hit detection
 hit_detection:
-  min_contour_area: 10  # Minimum pixels for valid dart
-  max_contour_area: 1000  # Maximum pixels
-  min_aspect_ratio: 0.3  # Filter by shape
-  max_aspect_ratio: 3.0
-  temporal_confirmation:
-    enabled: true
-    required_frames: 3  # Hit must be stable for N frames
-    position_tolerance_px: 5  # Max movement between frames
+  min_contour_area: 10
+  max_contour_area: 300
+  confirmation_frames: 5
+  position_tolerance_px: 10.0
+  confirmation_timeout_sec: 3.0
 
-# Game settings
 game:
-  default_mode: "501"  # "501", "301", "cricket", "around_the_clock"
-  double_out: true  # For 501/301: require double to finish
-  double_in: false  # Require double to start scoring
+  default_mode: "501"
+  default_starting_score: 501
+  double_out: true
 
-# Visualization
 visualization:
-  show_live_feed: true
-  show_warped_view: true
-  draw_board_overlay: true  # Draw sectors/rings on image
-  draw_hits: true
-  overlay_opacity: 0.3  # Transparency for overlays
+  show_overlay: true
+  overlay_opacity: 0.3
+  show_scores: true
 
-# Logging
 logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  format: "json"  # "json" or "text"
-  file: "logs/dart_vision.log"
-  max_bytes: 10485760  # 10 MB
-  backup_count: 5
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
