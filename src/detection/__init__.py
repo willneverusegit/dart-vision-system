@@ -2,12 +2,22 @@
 Detection module - motion detection and hit recognition.
 """
 from .motion import MotionDetector, MotionConfig
-from .hit_detector import HitDetector, HitDetectionConfig, HitCandidate
+from .detection_state import (
+    DetectionState,
+    DetectionStateMachine,
+    StateConfig,
+)
+from .hit_detector import (
+    EnhancedHitDetector as HitDetector,  # Use enhanced version
+    HitDetectionConfig,
+)
 
 __all__ = [
     "MotionDetector",
     "MotionConfig",
+    "DetectionState",
+    "DetectionStateMachine",
+    "StateConfig",
     "HitDetector",
     "HitDetectionConfig",
-    "HitCandidate",
 ]

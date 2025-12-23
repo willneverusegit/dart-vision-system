@@ -292,39 +292,51 @@ class LiveDemo:
         return result
 
     def _draw_hud(self, image: np.ndarray) -> np.ndarray:
-        """Draw heads-up display."""
-        # Info panel
-        info = {
-            "FPS": f"{self.current_fps:.1f}",
-            "Hits": len(self.hits),
-            "Score": self.total_score,
-            "Candidates": len(self.hit_detector.candidates),
-        }
+        """Draw HUD with game info and detection state."""
+        result = image.copy()
+        h, w = result.shape[:2]
 
-        if self.paused:
-            info["Status"] = "PAUSED"
+        # Semi-transparent background
+        overlay = result.copy()
+        cv2.rectangle(overlay, (10, 10), (w - 10, 150), (0, 0, 0), -1)
+        result = cv2.addWeighted(result, 0.7, overlay, 0.3, 0)
 
-        result = self.visualizer.draw_info_panel(image, info, position=(10, 30))
+        # FPS
+        fps_text = f"FPS: {self.camera.fps:.1f}"
+        cv2.putText(result, fps_text, (20, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        # Instructions at bottom
-        instructions = [
-            "Press 'o' for overlay",
-            "'m' for motion",
-            "'r' to reset",
-            "'q' to quit"
-        ]
+        # Hit count
+        hit_text = f"Hits: {len(self.hits)}"
+        cv2.putText(result, hit_text, (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        y_offset = image.shape[0] - 20
-        for i, text in enumerate(instructions):
-            cv2.putText(
-                result,
-                text,
-                (10, y_offset - i * 20),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.4,
-                (255, 255, 255),
-                1
-            )
+        # Total score
+        total = sum(hit.score for hit in self.hits)
+        score_text = f"Total: {total}"
+        cv2.putText(result, score_text, (20, 85),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # ← NEW: Detection state
+        if hasattr(self.hit_detector, 'state_machine'):
+            state = self.hit_detector.state_machine.state
+            state_colors = {
+                'idle': (128, 128, 128),
+                'watching': (0, 165, 255),
+                'confirming': (0, 255, 255),
+                'cooldown': (0, 255, 0),
+            }
+            state_text = f"State: {state.value.upper()}"
+            color = state_colors.get(state.value, (255, 255, 255))
+            cv2.putText(result, state_text, (20, 110),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+        # Active candidates
+        if hasattr(self.hit_detector, 'candidates'):
+            candidates = len(self.hit_detector.candidates)
+            cand_text = f"Candidates: {candidates}"
+            cv2.putText(result, cand_text, (20, 135),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
         return result
 
