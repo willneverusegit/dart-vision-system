@@ -29,6 +29,8 @@ class MotionConfig:
     morph_kernel_size: int = 3
     morph_iterations: int = 1
 
+    # ← NEU: ROI support
+    roi_margin_px: int = 50  # Margin around board for motion detection
 
 class MotionDetector:
     """

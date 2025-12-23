@@ -193,13 +193,9 @@ class LiveDemo:
 
         # Show motion mask overlay (semi-transparent)
         if self.show_motion and motion_mask is not None:
-            # Create colored motion overlay
-            motion_colored = cv2.cvtColor(motion_mask, cv2.COLOR_GRAY2BGR)
-            motion_colored[:, :, 0] = 0  # Remove blue
-            motion_colored[:, :, 1] = 0  # Remove green
-            # Red channel shows motion
-
-            display = cv2.addWeighted(display, 0.7, motion_colored, 0.3, 0)
+            # ← NEU: Draw contours on motion mask for debugging
+            motion_debug = self._draw_motion_debug(warped, motion_mask)
+            display = motion_debug
 
         # Draw board overlay
         if self.show_overlay:
@@ -209,10 +205,91 @@ class LiveDemo:
         if self.hits:
             display = self.visualizer.draw_hits(display, self.hits[-10:], show_scores=True)
 
+        # ← NEU: Draw active candidates
+        display = self._draw_candidates(display)
+
         # Draw HUD
         display = self._draw_hud(display)
 
         return display
+
+    def _draw_motion_debug(
+            self,
+            image: np.ndarray,
+            motion_mask: np.ndarray
+    ) -> np.ndarray:
+        """Draw motion detection debug visualization."""
+        debug = image.copy()
+
+        # Find contours in motion mask
+        contours, _ = cv2.findContours(
+            motion_mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        # Draw all contours in yellow
+        cv2.drawContours(debug, contours, -1, (0, 255, 255), 2)
+
+        # Draw filtered contours in green
+        config = self.hit_detector.config
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < config.min_contour_area or area > config.max_contour_area:
+                continue
+
+            x, y, w, h = cv2.boundingRect(contour)
+            if h == 0:
+                continue
+
+            aspect_ratio = w / h
+            if aspect_ratio < config.min_aspect_ratio or aspect_ratio > config.max_aspect_ratio:
+                continue
+
+            # Valid contour - draw in green
+            cv2.drawContours(debug, [contour], -1, (0, 255, 0), 2)
+
+            # Draw bounding box
+            cv2.rectangle(debug, (x, y), (x + w, y + h), (0, 255, 0), 1)
+
+            # Draw area text
+            cv2.putText(
+                debug,
+                f"A={area:.0f}",
+                (x, y - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                (0, 255, 0),
+                1
+            )
+
+        return debug
+
+    def _draw_candidates(self, image: np.ndarray) -> np.ndarray:
+        """Draw active hit candidates."""
+        result = image.copy()
+
+        for candidate in self.hit_detector.candidates:
+            x, y = candidate.position
+            x, y = int(x), int(y)
+
+            # Draw candidate position
+            color = (255, 255, 0)  # Yellow for unconfirmed
+            cv2.circle(result, (x, y), 5, color, 2)
+
+            # Draw confirmation progress
+            progress_text = f"{candidate.confirmation_count}/{self.hit_detector.config.confirmation_frames}"
+            cv2.putText(
+                result,
+                progress_text,
+                (x + 10, y - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                color,
+                1
+            )
+
+        return result
 
     def _draw_hud(self, image: np.ndarray) -> np.ndarray:
         """Draw heads-up display."""
