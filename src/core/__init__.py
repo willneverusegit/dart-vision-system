@@ -19,7 +19,15 @@ from .roi_utils import (
     ROIExtractor,
     PreprocessingPipeline,
 )
-from .config_loader import Config  # ← NEW
+from .config_loader import Config
+from .fps_limiter import (  # ← NEW
+    FPSLimiter,
+    AdaptiveFPSLimiter,
+)
+from .performance_monitor import (  # ← NEW
+    PerformanceMonitor,
+    PerformanceProfiler,
+)
 
 __all__ = [
     # Types
@@ -38,5 +46,10 @@ __all__ = [
     "ROIExtractor",
     "PreprocessingPipeline",
     # Config
-    "Config",  # ← NEW
+    "Config",
+    # Performance
+    "FPSLimiter",
+    "AdaptiveFPSLimiter",
+    "PerformanceMonitor",
+    "PerformanceProfiler",
 ]

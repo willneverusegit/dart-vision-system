@@ -1,5 +1,5 @@
 """
-Live demo of automatic dart hit detection.
+Live demo of automatic dart hit detection with performance monitoring.
 
 Integrates all modules:
 - Camera capture
@@ -7,11 +7,15 @@ Integrates all modules:
 - Motion detection
 - Hit recognition
 - Scoring and visualization
+- Performance profiling
+- Adaptive FPS limiting
 
 Usage:
     python scripts/live_demo.py
     python scripts/live_demo.py -v videos/game.mp4
     python scripts/live_demo.py -c 1 --calib config/calib.yaml
+    python scripts/live_demo.py -v videos/a.mp4 --profile
+    python scripts/live_demo.py --target-fps 15
 """
 import cv2
 import sys
@@ -19,12 +23,20 @@ import argparse
 from pathlib import Path
 import numpy as np
 import time
+from typing import Optional, List
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.capture import ThreadedCamera, CameraConfig
-from src.core import CalibrationData, load_yaml, BoardGeometry
+from src.core import (
+    CalibrationData,
+    load_yaml,
+    BoardGeometry,
+    Hit,
+    AdaptiveFPSLimiter,
+    PerformanceProfiler,
+)
 from src.board import DartboardMapper, BoardVisualizer
 from src.detection import HitDetector, HitDetectionConfig
 import logging
@@ -38,13 +50,15 @@ logger = logging.getLogger(__name__)
 
 
 class LiveDemo:
-    """Live demonstration of automatic dart hit detection."""
+    """Live demonstration with automatic hit detection and performance monitoring."""
 
     def __init__(
             self,
             camera: ThreadedCamera,
             calibration: CalibrationData,
-            show_debug: bool = False
+            show_debug: bool = False,
+            enable_profiling: bool = False,
+            adaptive_fps: bool = True,
     ):
         """
         Initialize live demo.
@@ -53,6 +67,8 @@ class LiveDemo:
             camera: Threaded camera instance
             calibration: Loaded calibration data
             show_debug: Show debug visualizations
+            enable_profiling: Enable performance profiling
+            adaptive_fps: Use adaptive FPS limiting
         """
         self.camera = camera
         self.calib = calibration
@@ -72,7 +88,7 @@ class LiveDemo:
         self.hit_detector = HitDetector(self.mapper, config=detection_config)
 
         # Game state
-        self.hits = []
+        self.hits: List[Hit] = []
         self.total_score = 0
 
         # UI state
@@ -85,7 +101,27 @@ class LiveDemo:
         self.fps_frame_count = 0
         self.current_fps = 0.0
 
-        logger.info("LiveDemo initialized")
+        # Performance monitoring
+        self.enable_profiling = enable_profiling
+        if enable_profiling:
+            self.profiler = PerformanceProfiler()
+        else:
+            self.profiler = None
+
+        # Adaptive FPS limiting
+        if adaptive_fps:
+            self.fps_limiter = AdaptiveFPSLimiter(
+                idle_fps=10.0,
+                active_fps=25.0,
+                cooldown_fps=15.0
+            )
+        else:
+            self.fps_limiter = None
+
+        logger.info(
+            f"LiveDemo initialized: "
+            f"profiling={enable_profiling}, adaptive_fps={adaptive_fps}"
+        )
 
     def run(self):
         """Run live demo."""
@@ -98,6 +134,8 @@ class LiveDemo:
         print("  'r': Reset detection (clear hits)")
         print("  'p': Pause/Resume")
         print("  's': Show statistics")
+        if self.profiler:
+            print("  'f': Show performance analysis")
         print("  'q': Quit")
         print("=" * 60 + "\n")
 
@@ -111,70 +149,18 @@ class LiveDemo:
 
             while True:
                 if not self.paused:
-                    # Read frame
-                    frame = self.camera.read(timeout=1.0)
-
-                    if frame is None:
-                        continue
-
-                    # Update FPS
-                    self._update_fps()
-
-                    # Warp frame to calibrated view
-                    warped = cv2.warpPerspective(
-                        frame.image,
-                        self.calib.homography_matrix,
-                        (800, 800)
-                    )
-
-                    # Create Frame object for detection
-                    detection_frame = type('Frame', (), {
-                        'image': warped,
-                        'frame_id': frame.frame_id,
-                        'timestamp': frame.timestamp,
-                        'fps': frame.fps
-                    })()
-
-                    # Detect hit
-                    hit = self.hit_detector.detect(detection_frame)
-
-                    if hit:
-                        self.hits.append(hit)
-                        self.total_score += hit.score
-                        logger.info(f"New hit: {hit.score} points (Total: {self.total_score})")
-
-                    # Get motion mask for visualization
-                    if self.show_motion or self.show_debug:
-                        # Access internal motion detector for mask
-                        motion_mask, _ = self.hit_detector.motion_detector.detect(warped)
-                        last_motion_mask = motion_mask
-
-                    # Visualize
-                    display = self._create_display(warped, last_motion_mask)
-
-                    cv2.imshow("Live Demo", display)
-
-                    if self.show_debug and last_motion_mask is not None:
-                        cv2.imshow("Motion Mask", last_motion_mask)
+                    self._process_frame_wrapper(last_motion_mask)
 
                 # Handle keys
                 key = cv2.waitKey(1) & 0xFF
 
-                if key == ord('q'):
+                if not self._handle_key(key):
                     break
-                elif key == ord('o'):
-                    self.show_overlay = not self.show_overlay
-                    logger.info(f"Overlay: {'ON' if self.show_overlay else 'OFF'}")
-                elif key == ord('m'):
-                    self.show_motion = not self.show_motion
-                    logger.info(f"Motion view: {'ON' if self.show_motion else 'OFF'}")
-                elif key == ord('r'):
-                    self._reset()
-                elif key == ord('p'):
-                    self.paused = not self.paused
-                    logger.info(f"{'PAUSED' if self.paused else 'RESUMED'}")
-                elif key == ord('s'):
-                    self._print_stats()
+
+                # FPS limiting
+                if self.fps_limiter:
+                    self._update_fps_mode()
+                    self.fps_limiter.wait()
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
@@ -183,17 +169,94 @@ class LiveDemo:
             cv2.destroyAllWindows()
             self._print_summary()
 
+    def _process_frame_wrapper(self, last_motion_mask):
+        """Wrapper for frame processing with profiling support."""
+        # Profile capture
+        if self.profiler:
+            with self.profiler.monitor.measure("capture"):
+                frame = self.camera.read(timeout=0.1)
+        else:
+            frame = self.camera.read(timeout=0.1)
+
+        if frame is None:
+            return
+
+        # Update FPS
+        self._update_fps()
+
+        # Profile preprocessing
+        if self.profiler:
+            with self.profiler.monitor.measure("preprocessing"):
+                warped = cv2.warpPerspective(
+                    frame.image,
+                    self.calib.homography_matrix,
+                    (800, 800)
+                )
+        else:
+            warped = cv2.warpPerspective(
+                frame.image,
+                self.calib.homography_matrix,
+                (800, 800)
+            )
+
+        # Create Frame object for detection
+        detection_frame = type('Frame', (), {
+            'image': warped,
+            'frame_id': frame.frame_id,
+            'timestamp': frame.timestamp,
+            'fps': frame.fps
+        })()
+
+        # Profile detection
+        if self.profiler:
+            with self.profiler.monitor.measure("motion_detection"):
+                motion_mask, _ = self.hit_detector.motion_detector.detect(warped)
+
+            with self.profiler.monitor.measure("hit_detection"):
+                hit = self.hit_detector.detect(detection_frame)
+        else:
+            # Detect hit
+            hit = self.hit_detector.detect(detection_frame)
+
+            # Get motion mask for visualization
+            if self.show_motion or self.show_debug:
+                motion_mask, _ = self.hit_detector.motion_detector.detect(warped)
+            else:
+                motion_mask = None
+
+        if hit:
+            self.hits.append(hit)
+            self.total_score += hit.score
+            logger.info(f"New hit: {hit.score} points (Total: {self.total_score})")
+
+        # Get motion mask if needed
+        if self.show_motion or self.show_debug:
+            if motion_mask is None:
+                motion_mask, _ = self.hit_detector.motion_detector.detect(warped)
+            last_motion_mask = motion_mask
+
+        # Profile visualization
+        if self.profiler:
+            with self.profiler.monitor.measure("visualization"):
+                display = self._create_display(warped, last_motion_mask)
+        else:
+            display = self._create_display(warped, last_motion_mask)
+
+        cv2.imshow("Live Demo", display)
+
+        if self.show_debug and last_motion_mask is not None:
+            cv2.imshow("Motion Mask", last_motion_mask)
+
     def _create_display(
             self,
             warped: np.ndarray,
-            motion_mask: np.ndarray = None
+            motion_mask: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """Create display image with overlays."""
         display = warped.copy()
 
         # Show motion mask overlay (semi-transparent)
         if self.show_motion and motion_mask is not None:
-            # ← NEU: Draw contours on motion mask for debugging
             motion_debug = self._draw_motion_debug(warped, motion_mask)
             display = motion_debug
 
@@ -205,7 +268,7 @@ class LiveDemo:
         if self.hits:
             display = self.visualizer.draw_hits(display, self.hits[-10:], show_scores=True)
 
-        # ← NEU: Draw active candidates
+        # Draw active candidates
         display = self._draw_candidates(display)
 
         # Draw HUD
@@ -302,7 +365,7 @@ class LiveDemo:
         result = cv2.addWeighted(result, 0.7, overlay, 0.3, 0)
 
         # FPS
-        fps_text = f"FPS: {self.camera.fps:.1f}"
+        fps_text = f"FPS: {self.current_fps:.1f}"
         cv2.putText(result, fps_text, (20, 35),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
@@ -312,12 +375,11 @@ class LiveDemo:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         # Total score
-        total = sum(hit.score for hit in self.hits)
-        score_text = f"Total: {total}"
+        score_text = f"Total: {self.total_score}"
         cv2.putText(result, score_text, (20, 85),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # ← NEW: Detection state
+        # Detection state
         if hasattr(self.hit_detector, 'state_machine'):
             state = self.hit_detector.state_machine.state
             state_colors = {
@@ -352,6 +414,58 @@ class LiveDemo:
             self.fps_frame_count = 0
             self.fps_start_time = time.time()
 
+    def _update_fps_mode(self):
+        """Update adaptive FPS based on detection state."""
+        if not self.fps_limiter or not self.hit_detector:
+            return
+
+        # Get current detection state
+        if hasattr(self.hit_detector, 'state_machine'):
+            state = self.hit_detector.state_machine.state.value
+
+            if state == 'idle':
+                self.fps_limiter.set_mode('idle')
+            elif state in ['watching', 'confirming']:
+                self.fps_limiter.set_mode('active')
+            elif state == 'cooldown':
+                self.fps_limiter.set_mode('cooldown')
+
+    def _handle_key(self, key: int) -> bool:
+        """
+        Handle keyboard input.
+
+        Returns:
+            False to quit, True to continue
+        """
+        if key == ord('q'):
+            return False
+
+        elif key == ord('o'):
+            self.show_overlay = not self.show_overlay
+            logger.info(f"Overlay: {'ON' if self.show_overlay else 'OFF'}")
+
+        elif key == ord('m'):
+            self.show_motion = not self.show_motion
+            logger.info(f"Motion view: {'ON' if self.show_motion else 'OFF'}")
+
+        elif key == ord('r'):
+            self._reset()
+
+        elif key == ord('p'):
+            self.paused = not self.paused
+            logger.info(f"{'PAUSED' if self.paused else 'RESUMED'}")
+
+        elif key == ord('s'):
+            self._print_stats()
+
+        elif key == ord('f'):
+            if self.profiler:
+                self.profiler.print_analysis()
+            else:
+                logger.info("Profiling not enabled (use --profile flag)")
+
+        return True
+
     def _reset(self):
         """Reset detection and game state."""
         self.hits.clear()
@@ -360,20 +474,37 @@ class LiveDemo:
         logger.info("Reset complete")
 
     def _print_stats(self):
-        """Print detection statistics."""
-        stats = self.hit_detector.get_stats()
-
-        print("\n" + "=" * 60)
+        """Print detection and performance statistics."""
+        print("\n" + "=" * 80)
         print("Detection Statistics")
-        print("=" * 60)
-        print(f"Frames processed:      {stats['frames_processed']}")
-        print(f"Motion frames:         {stats['motion_frames']} ({stats['motion_rate_percent']:.1f}%)")
-        print(f"Candidates created:    {stats['candidates_created']}")
-        print(f"Hits confirmed:        {stats['hits_confirmed']}")
-        print(f"Confirmation rate:     {stats['confirmation_rate_percent']:.1f}%")
-        print(f"Active candidates:     {stats['active_candidates']}")
-        print(f"Current FPS:           {self.current_fps:.1f}")
-        print("=" * 60 + "\n")
+        print("=" * 80)
+
+        # Hit detector stats
+        stats = self.hit_detector.get_stats()
+        print("\nDetection:")
+        for key, value in stats.items():
+            if isinstance(value, float):
+                print(f"  {key}: {value:.2f}")
+            else:
+                print(f"  {key}: {value}")
+
+        # FPS limiter stats
+        if self.fps_limiter:
+            print("\nFPS Limiter:")
+            fps_stats = self.fps_limiter.get_stats()
+            for key, value in fps_stats.items():
+                if isinstance(value, float):
+                    print(f"  {key}: {value:.2f}")
+                else:
+                    print(f"  {key}: {value}")
+
+        # Camera stats
+        print(f"\nCamera FPS: {self.camera.fps:.1f}")
+        print(f"Display FPS: {self.current_fps:.1f}")
+        print(f"Hits detected: {len(self.hits)}")
+        print(f"Total score: {self.total_score}")
+
+        print("=" * 80 + "\n")
 
     def _print_summary(self):
         """Print final summary."""
@@ -398,7 +529,7 @@ class LiveDemo:
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Live demo of automatic dart hit detection"
+        description="Live demo with performance monitoring"
     )
 
     parser.add_argument(
@@ -432,6 +563,26 @@ def parse_args():
         "--no-loop",
         action="store_true",
         help="Don't loop video (default: loop)"
+    )
+
+    # Performance arguments
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable performance profiling (press 'f' to view)"
+    )
+
+    parser.add_argument(
+        "--no-adaptive-fps",
+        action="store_true",
+        help="Disable adaptive FPS limiting"
+    )
+
+    parser.add_argument(
+        "--target-fps",
+        type=float,
+        default=None,
+        help="Fixed target FPS (overrides adaptive)"
     )
 
     return parser.parse_args()
@@ -484,7 +635,18 @@ def main():
 
     try:
         # Run demo
-        demo = LiveDemo(camera, calib_data, show_debug=args.debug)
+        demo = LiveDemo(
+            camera=camera,
+            calibration=calib_data,
+            show_debug=args.debug,
+            enable_profiling=args.profile,
+            adaptive_fps=not args.no_adaptive_fps,
+        )
+
+        # Override FPS if specified
+        if args.target_fps and demo.fps_limiter:
+            demo.fps_limiter.set_target_fps(args.target_fps)
+
         demo.run()
 
     finally:
