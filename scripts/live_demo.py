@@ -179,7 +179,7 @@ class LiveDemo:
             frame = self.camera.read(timeout=0.1)
 
         if frame is None:
-            return
+            return last_motion_mask  # Return existing mask
 
         # Update FPS
         self._update_fps()
@@ -207,45 +207,34 @@ class LiveDemo:
             'fps': frame.fps
         })()
 
-        # Profile detection
+        # ← GEÄNDERT: Nur Detection, Motion Mask wird intern berechnet
         if self.profiler:
-            with self.profiler.monitor.measure("motion_detection"):
-                motion_mask, _ = self.hit_detector.motion_detector.detect(warped)
-
-            with self.profiler.monitor.measure("hit_detection"):
+            with self.profiler.monitor.measure("detection"):
                 hit = self.hit_detector.detect(detection_frame)
         else:
-            # Detect hit
             hit = self.hit_detector.detect(detection_frame)
 
-            # Get motion mask for visualization
-            if self.show_motion or self.show_debug:
-                motion_mask, _ = self.hit_detector.motion_detector.detect(warped)
-            else:
-                motion_mask = None
+        # ← NEU: Hole Motion Mask vom Detector (schon berechnet!)
+        motion_mask = self.hit_detector.last_motion_mask
 
         if hit:
             self.hits.append(hit)
             self.total_score += hit.score
             logger.info(f"New hit: {hit.score} points (Total: {self.total_score})")
 
-        # Get motion mask if needed
-        if self.show_motion or self.show_debug:
-            if motion_mask is None:
-                motion_mask, _ = self.hit_detector.motion_detector.detect(warped)
-            last_motion_mask = motion_mask
-
         # Profile visualization
         if self.profiler:
             with self.profiler.monitor.measure("visualization"):
-                display = self._create_display(warped, last_motion_mask)
+                display = self._create_display(warped, motion_mask)
         else:
-            display = self._create_display(warped, last_motion_mask)
+            display = self._create_display(warped, motion_mask)
 
         cv2.imshow("Live Demo", display)
 
-        if self.show_debug and last_motion_mask is not None:
-            cv2.imshow("Motion Mask", last_motion_mask)
+        if self.show_debug and motion_mask is not None:
+            cv2.imshow("Motion Mask", motion_mask)
+
+        return motion_mask  # Return for next iteration
 
     def _create_display(
             self,

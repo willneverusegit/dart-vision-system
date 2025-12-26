@@ -107,6 +107,8 @@ class EnhancedHitDetector:
 
         # Frame differencing for static object detection
         self.previous_frame: Optional[np.ndarray] = None
+        # ← NEU: Store last motion mask for visualization
+        self.last_motion_mask: Optional[np.ndarray] = None
 
         # Statistics
         self.frames_processed = 0
@@ -130,6 +132,8 @@ class EnhancedHitDetector:
 
         # Step 1: Motion Detection
         motion_mask, has_motion = self.motion_detector.detect(frame.image)
+        # ← NEU: Store for visualization
+        self.last_motion_mask = motion_mask
         motion_pixels = cv2.countNonZero(motion_mask) if has_motion else 0
 
         if has_motion:

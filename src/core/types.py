@@ -2,29 +2,11 @@
 Core data types for dart vision system.
 Defines contracts between modules to ensure stable interfaces.
 """
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, List
 import numpy as np
 from numpy.typing import NDArray
-
-
-@dataclass
-class Frame:
-    """
-    Represents a single captured frame with metadata.
-    """
-    image: NDArray[np.uint8]  # Raw image data (H, W, C) or (H, W)
-    timestamp: float  # Unix timestamp
-    frame_id: int  # Sequential frame counter
-    fps: Optional[float] = None  # Frames per second at capture time
-
-    @property
-    def shape(self) -> Tuple[int, ...]:
-        return self.image.shape
-
-    @property
-    def is_grayscale(self) -> bool:
-        return len(self.image.shape) == 2
 
 
 @dataclass
@@ -50,6 +32,71 @@ class ROI:
     def center(self) -> Tuple[int, int]:
         """Return center coordinates (x, y)."""
         return (self.x + self.width // 2, self.y + self.height // 2)
+
+
+@dataclass
+class FrameTransform:
+    """Describes geometric changes applied during preprocessing."""
+
+    offset: Tuple[int, int] = (0, 0)  # (x, y) offset introduced by cropping
+    scale: float = 1.0  # Uniform scaling factor applied after cropping
+    effective_mm_per_pixel: Optional[float] = None  # Updated mm/px after scaling
+    roi: Optional[ROI] = None
+
+    def to_full_coords(self, x: float, y: float) -> Tuple[float, float]:
+        """
+        Map coordinates from transformed space back to the original frame.
+
+        Args:
+            x: X coordinate after preprocessing
+            y: Y coordinate after preprocessing
+
+        Returns:
+            (x_full, y_full) in the original (preprocessed) frame
+        """
+        if self.scale == 0:
+            return x, y
+
+        x_full = x / self.scale + self.offset[0]
+        y_full = y / self.scale + self.offset[1]
+        return x_full, y_full
+
+    def to_transformed_coords(self, x: float, y: float) -> Tuple[float, float]:
+        """
+        Map original frame coordinates into the transformed space.
+
+        Args:
+            x: X coordinate in the original frame
+            y: Y coordinate in the original frame
+
+        Returns:
+            (x_transformed, y_transformed) after cropping/scaling
+        """
+        x_transformed = (x - self.offset[0]) * self.scale
+        y_transformed = (y - self.offset[1]) * self.scale
+        return x_transformed, y_transformed
+
+
+@dataclass
+class Frame:
+    """
+    Represents a single captured frame with metadata.
+    """
+    image: NDArray[np.uint8]  # Raw image data (H, W, C) or (H, W)
+    timestamp: float  # Unix timestamp
+    frame_id: int  # Sequential frame counter
+    fps: Optional[float] = None  # Frames per second at capture time
+    transform: Optional[FrameTransform] = None  # Applied preprocessing transform
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return self.image.shape
+
+    @property
+    def is_grayscale(self) -> bool:
+        return len(self.image.shape) == 2
+
+
 
 
 @dataclass
@@ -115,6 +162,23 @@ class Hit:
     confidence: float = 1.0  # Detection confidence (0.0 - 1.0)
     timestamp: Optional[float] = None
     frame_id: Optional[int] = None
+
+    # ← NEU: Convenience properties for easier access
+    @property
+    def x(self) -> float:
+        """X coordinate (alias for x_px)."""
+        return self.x_px
+
+    @property
+    def y(self) -> float:
+        """Y coordinate (alias for y_px)."""
+        return self.y_px
+
+    @property
+    def position(self) -> Tuple[float, float]:
+        """Position as (x, y) tuple."""
+        return (self.x_px, self.y_px)
+
 
 
 @dataclass
