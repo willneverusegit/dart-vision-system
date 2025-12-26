@@ -49,6 +49,7 @@ class HitDetectionConfig:
     # Motion and state configs
     motion_config: MotionConfig = field(default_factory=MotionConfig)
     state_config: StateConfig = field(default_factory=StateConfig)
+    background_history_frames: int = 5  # Quiet frames used for median background
 
 
 @dataclass
@@ -107,6 +108,8 @@ class EnhancedHitDetector:
 
         # Frame differencing for static object detection
         self.previous_frame: Optional[np.ndarray] = None
+        self.quiet_frame_buffer: List[np.ndarray] = []
+        self.consecutive_no_motion_frames: int = 0
         # ← NEU: Store last motion mask for visualization
         self.last_motion_mask: Optional[np.ndarray] = None
 
@@ -138,6 +141,10 @@ class EnhancedHitDetector:
 
         if has_motion:
             self.motion_frames += 1
+            self.consecutive_no_motion_frames = 0
+        else:
+            self.consecutive_no_motion_frames += 1
+            self._update_quiet_background(frame.image)
 
         # Step 2: Update State Machine
         confirmed_hit_pos = None
@@ -151,8 +158,21 @@ class EnhancedHitDetector:
         hit = None
 
         if current_state == DetectionState.CONFIRMING:
-            # This is the critical phase: search for new dart
-            hit = self._process_confirming_state(frame, motion_mask)
+            quiet_needed = self.config.state_config.confirming_quiet_frames
+            if quiet_needed and self.consecutive_no_motion_frames < quiet_needed:
+                logger.debug(
+                    "Waiting for quiet frames before confirming: %d/%d",
+                    self.consecutive_no_motion_frames,
+                    quiet_needed
+                )
+            else:
+                # This is the critical phase: search for new dart
+                background_frame = self._get_background_frame()
+                hit = self._process_confirming_state(
+                    frame,
+                    motion_mask,
+                    background_frame=background_frame
+                )
 
             if hit:
                 # Update state machine with confirmed position
@@ -170,7 +190,12 @@ class EnhancedHitDetector:
 
         return hit
 
-    def _process_confirming_state(self, frame, motion_mask: np.ndarray) -> Optional[Hit]:
+    def _process_confirming_state(
+        self,
+        frame,
+        motion_mask: np.ndarray,
+        background_frame: Optional[np.ndarray] = None
+    ) -> Optional[Hit]:
         """
         Process frame in CONFIRMING state.
 
@@ -179,12 +204,15 @@ class EnhancedHitDetector:
         Args:
             frame: Input frame
             motion_mask: Current motion mask
+            background_frame: Median quiet background frame if available
 
         Returns:
             Confirmed hit or None
         """
         # Frame differencing: Find new objects
-        if self.previous_frame is not None:
+        if background_frame is not None:
+            new_objects_mask = self._find_new_objects(frame.image, background_frame)
+        elif self.previous_frame is not None:
             new_objects_mask = self._find_new_objects(frame.image, self.previous_frame)
         else:
             new_objects_mask = motion_mask
@@ -220,7 +248,7 @@ class EnhancedHitDetector:
     def _find_new_objects(
         self,
         current_frame: np.ndarray,
-        previous_frame: np.ndarray
+        background_frame: np.ndarray
     ) -> np.ndarray:
         """
         Find new static objects using frame differencing.
@@ -229,21 +257,13 @@ class EnhancedHitDetector:
 
         Args:
             current_frame: Current frame
-            previous_frame: Previous frame
+            background_frame: Background frame (median of quiet frames or last frame)
 
         Returns:
             Binary mask of new objects
         """
-        # Convert to grayscale if needed
-        if len(current_frame.shape) == 3:
-            current_gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
-        else:
-            current_gray = current_frame
-
-        if len(previous_frame.shape) == 3:
-            previous_gray = cv2.cvtColor(previous_frame, cv2.COLOR_BGR2GRAY)
-        else:
-            previous_gray = previous_frame
+        current_gray = self._to_grayscale(current_frame)
+        previous_gray = self._to_grayscale(background_frame)
 
         # Absolute difference
         diff = cv2.absdiff(current_gray, previous_gray)
@@ -510,6 +530,8 @@ class EnhancedHitDetector:
         self.state_machine.reset()
         self.candidates.clear()
         self.previous_frame = None
+        self.quiet_frame_buffer.clear()
+        self.consecutive_no_motion_frames = 0
         logger.info("Detector reset")
 
     def get_stats(self) -> dict:
@@ -528,4 +550,33 @@ class EnhancedHitDetector:
             "hits_confirmed": self.hits_confirmed,
             "confirmation_rate_percent": confirmation_rate,
             "active_candidates": len(self.candidates),
+            "quiet_frame_buffer": len(self.quiet_frame_buffer),
+            "consecutive_no_motion_frames": self.consecutive_no_motion_frames,
         }
+
+    def _update_quiet_background(self, frame: np.ndarray) -> None:
+        """Store quiet frames for background estimation."""
+        if self.config.background_history_frames <= 0:
+            return
+
+        gray_frame = self._to_grayscale(frame).copy()
+        self.quiet_frame_buffer.append(gray_frame)
+
+        if len(self.quiet_frame_buffer) > self.config.background_history_frames:
+            self.quiet_frame_buffer.pop(0)
+
+    def _get_background_frame(self) -> Optional[np.ndarray]:
+        """Compute median background from quiet frames."""
+        if not self.quiet_frame_buffer:
+            return None
+
+        stack = np.stack(self.quiet_frame_buffer, axis=0)
+        median_background = np.median(stack, axis=0).astype(np.uint8)
+        return median_background
+
+    @staticmethod
+    def _to_grayscale(frame: np.ndarray) -> np.ndarray:
+        """Convert frame to grayscale if needed."""
+        if len(frame.shape) == 3:
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return frame

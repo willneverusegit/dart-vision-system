@@ -39,6 +39,7 @@ class StateConfig:
     # Confirming state
     confirming_duration_sec: float = 2.0  # How long to search after motion stops
     confirmation_frames: int = 5  # Frames needed to confirm
+    confirming_quiet_frames: int = 2  # Require N quiet frames before confirming
 
     # Cooldown state
     cooldown_duration_sec: float = 1.0  # Cooldown after confirmed hit
@@ -81,7 +82,8 @@ class DetectionStateMachine:
         logger.info(
             f"StateMachine initialized: "
             f"watching={self.config.watching_duration_sec}s, "
-            f"confirming={self.config.confirming_duration_sec}s, "
+            f"confirming={self.config.confirming_duration_sec}s "
+            f"(quiet_frames={self.config.confirming_quiet_frames}), "
             f"cooldown={self.config.cooldown_duration_sec}s"
         )
 
