@@ -1,7 +1,7 @@
 # Dart Vision System Configuration
 
 camera:
-  index: 2
+  index: 0
   width: 1280
   height: 720
   fps: 30
@@ -61,9 +61,18 @@ motion_detection:
 hit_detection:
   min_contour_area: 20
   max_contour_area: 200
+  min_aspect_ratio: 0.3
+  max_aspect_ratio: 3.0
+  min_solidity: 0.35
+  min_circularity: 0.12
   confirmation_frames: 3
   position_tolerance_px: 10.0
   confirmation_timeout_sec: 3.0
+  enable_subpixel: true
+  subpixel_win_size: 5
+  subpixel_max_iter: 10
+  background_history_frames: 3
+  timing_log_interval_frames: 0
 
 game:
   default_mode: "501"
@@ -74,6 +83,15 @@ visualization:
   show_overlay: true
   overlay_opacity: 0.3
   show_scores: true
+
+detection_state:
+  watching_duration_sec: 1.0
+  confirming_duration_sec: 1.2
+  confirming_quiet_frames: 1
+  cooldown_duration_sec: 1.0
+  cooldown_radius_px: 100.0
+  min_frames_since_hit: 2
+  min_pixel_drift_px: 8.0
 
 logging:
   level: "INFO"

@@ -3,7 +3,7 @@ Unit tests for detection module.
 """
 import numpy as np
 import pytest
-import cv2
+cv2 = pytest.importorskip("cv2", exc_type=ImportError)
 from src.detection import MotionDetector, MotionConfig, HitDetector, HitDetectionConfig
 from src.core import Frame, BoardGeometry
 from src.board import DartboardMapper

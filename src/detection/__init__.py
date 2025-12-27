@@ -7,6 +7,11 @@ from .detection_state import (
     DetectionStateMachine,
     StateConfig,
 )
+from .config_loader import (
+    build_hit_detection_config,
+    load_detection_config,
+    load_detection_settings,
+)
 from .hit_detector import (
     EnhancedHitDetector as HitDetector,  # Use enhanced version
     HitDetectionConfig,
@@ -20,4 +25,7 @@ __all__ = [
     "StateConfig",
     "HitDetector",
     "HitDetectionConfig",
+    "build_hit_detection_config",
+    "load_detection_config",
+    "load_detection_settings",
 ]

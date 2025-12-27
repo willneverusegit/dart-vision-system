@@ -22,6 +22,7 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import threading
 import time
+from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -29,7 +30,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.capture import ThreadedCamera, CameraConfig
 from src.core import CalibrationData, Frame, load_yaml, BoardGeometry, Hit
 from src.board import DartboardMapper, BoardVisualizer
-from src.detection import HitDetector, HitDetectionConfig
+from src.detection import (
+    HitDetector,
+    HitDetectionConfig,
+    build_hit_detection_config,
+    load_detection_settings,
+)
 from src.game import GameState, Mode501, ModeTraining, Player
 import logging
 
@@ -699,7 +705,8 @@ class DartGameApp(tk.Tk):
     def __init__(
             self,
             camera: ThreadedCamera,
-            calibration: CalibrationData
+            calibration: CalibrationData,
+            detection_config: Optional[HitDetectionConfig] = None,
     ):
         """
         Initialize application.
@@ -707,6 +714,7 @@ class DartGameApp(tk.Tk):
         Args:
             camera: Camera instance
             calibration: Calibration data
+            detection_config: Hit detection config (loaded from YAML)
         """
         super().__init__()
 
@@ -715,6 +723,7 @@ class DartGameApp(tk.Tk):
 
         self.camera = camera
         self.calibration = calibration
+        self.detection_config = detection_config or HitDetectionConfig()
 
         # Initialize mapper and visualizer
         self.mapper = DartboardMapper(
@@ -755,7 +764,7 @@ class DartGameApp(tk.Tk):
         # Create hit detector for auto mode
         hit_detector = None
         if input_mode == "auto":
-            hit_detector = HitDetector(self.mapper, config=HitDetectionConfig())
+            hit_detector = HitDetector(self.mapper, config=self.detection_config)
 
         # Show game screen
         self.game_screen = GameScreen(
@@ -812,12 +821,21 @@ def parse_args():
         help="Start in automatic mode"
     )
 
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/default_config.yaml",
+        help="Path to YAML configuration with detection parameters"
+    )
+
     return parser.parse_args()
 
 
 def main():
     """Run dart game application."""
     args = parse_args()
+
+    settings = load_detection_settings(args.config)
 
     # Load calibration
     calib_path = Path(args.calib)
@@ -841,7 +859,10 @@ def main():
         logger.error(f"Failed to load calibration: {e}")
         return
 
-    # Determine source
+    # Determine source (CLI overrides config defaults)
+    camera_settings = settings.get("camera", {})
+    default_source = camera_settings.get("index", 0)
+
     if args.video:
         source = args.video
         loop = True
@@ -849,12 +870,20 @@ def main():
         source = args.camera
         loop = False
     else:
-        source = 0
+        source = default_source
         loop = False
 
     # Initialize camera
-    cam_config = CameraConfig(source=source, loop_video=loop)
-    camera = ThreadedCamera(config=cam_config, queue_size=3)
+    cam_config = CameraConfig(
+        source=source,
+        width=camera_settings.get("width", 1280),
+        height=camera_settings.get("height", 720),
+        fps=camera_settings.get("fps", 30),
+        loop_video=loop
+    )
+    capture_settings = settings.get("capture", {})
+    queue_size = capture_settings.get("queue_size", 3)
+    camera = ThreadedCamera(config=cam_config, queue_size=queue_size)
 
     if not camera.start():
         logger.error("Failed to start camera/video")
@@ -862,7 +891,8 @@ def main():
 
     try:
         # Run application
-        app = DartGameApp(camera, calib_data)
+        detection_config = build_hit_detection_config(settings)
+        app = DartGameApp(camera, calib_data, detection_config=detection_config)
         app.mainloop()
 
     finally:

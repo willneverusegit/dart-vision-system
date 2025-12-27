@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import time
 from pathlib import Path
-import cv2
+cv2 = pytest.importorskip("cv2", exc_type=ImportError)
 
 from src.core import Frame, CalibrationData, BoardGeometry
 from src.calibration import CalibratorBase, ManualCalibrator, CharucoCalibrator

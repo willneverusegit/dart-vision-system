@@ -39,7 +39,12 @@ from src.core import (
     PerformanceProfiler,
 )
 from src.board import DartboardMapper, BoardVisualizer
-from src.detection import HitDetector, HitDetectionConfig
+from src.detection import (
+    HitDetector,
+    HitDetectionConfig,
+    build_hit_detection_config,
+    load_detection_settings,
+)
 import logging
 
 # Setup logging
@@ -62,6 +67,7 @@ class LiveDemo:
             adaptive_fps: bool = True,
             stats_csv: Optional[str] = None,
             stats_interval: int = 60,
+            detection_config: Optional[HitDetectionConfig] = None,
     ):
         """
         Initialize live demo.
@@ -72,6 +78,7 @@ class LiveDemo:
             show_debug: Show debug visualizations
             enable_profiling: Enable performance profiling
             adaptive_fps: Use adaptive FPS limiting
+            detection_config: Optional detection configuration (defaults to YAML values)
         """
         self.camera = camera
         self.calib = calibration
@@ -87,8 +94,10 @@ class LiveDemo:
         self.visualizer = BoardVisualizer(self.mapper, opacity=0.3)
 
         # Initialize hit detector
-        detection_config = HitDetectionConfig()
-        self.hit_detector = HitDetector(self.mapper, config=detection_config)
+        self.hit_detector = HitDetector(
+            self.mapper,
+            config=detection_config or HitDetectionConfig()
+        )
 
         # Game state
         self.hits: List[Hit] = []
@@ -704,12 +713,21 @@ def parse_args():
         help="How many frames between CSV stat rows (default: 60)"
     )
 
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/default_config.yaml",
+        help="Path to YAML configuration with detection parameters"
+    )
+
     return parser.parse_args()
 
 
 def main():
     """Run live demo."""
     args = parse_args()
+
+    settings = load_detection_settings(args.config)
 
     # Load calibration
     calib_path = Path(args.calib)
@@ -733,7 +751,10 @@ def main():
         logger.error(f"Failed to load calibration: {e}")
         return
 
-    # Determine source
+    # Determine source (CLI overrides config defaults)
+    camera_settings = settings.get("camera", {})
+    default_source = camera_settings.get("index", 0)
+
     if args.video:
         source = args.video
         loop = not args.no_loop
@@ -741,12 +762,20 @@ def main():
         source = args.camera
         loop = False
     else:
-        source = 0  # Default camera
+        source = default_source
         loop = False
 
     # Initialize camera
-    cam_config = CameraConfig(source=source, loop_video=loop)
-    camera = ThreadedCamera(config=cam_config, queue_size=3)
+    cam_config = CameraConfig(
+        source=source,
+        width=camera_settings.get("width", 1280),
+        height=camera_settings.get("height", 720),
+        fps=camera_settings.get("fps", 30),
+        loop_video=loop
+    )
+    capture_settings = settings.get("capture", {})
+    queue_size = capture_settings.get("queue_size", 3)
+    camera = ThreadedCamera(config=cam_config, queue_size=queue_size)
 
     if not camera.start():
         logger.error("Failed to start camera/video")
@@ -762,11 +791,18 @@ def main():
             adaptive_fps=not args.no_adaptive_fps,
             stats_csv=args.stats_csv,
             stats_interval=args.stats_interval,
+            detection_config=build_hit_detection_config(settings),
         )
 
         # Override FPS if specified
-        if args.target_fps and demo.fps_limiter:
-            demo.fps_limiter.set_target_fps(args.target_fps)
+        target_fps = args.target_fps
+        if target_fps is None:
+            perf_settings = settings.get("performance", {})
+            if perf_settings.get("enable_fps_limit"):
+                target_fps = perf_settings.get("target_fps")
+
+        if target_fps and demo.fps_limiter:
+            demo.fps_limiter.set_target_fps(target_fps)
 
         demo.run()
 
