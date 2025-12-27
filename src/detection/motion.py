@@ -25,13 +25,13 @@ class MotionConfig:
     """
     # MOG2 parameters (research-optimized)
     history: int = 150  # ← CHANGED: Was 500, now 100-150
-    var_threshold: float = 20.0  # ← CHANGED: Was 16.0, now 16-24 range
+    var_threshold: float = 24.0  # ← CHANGED: Was 16.0, now 16-24 range
     detect_shadows: bool = False
     learning_rate: float = 0.005  # ← NEW: 0.001-0.01 range
 
     # Motion thresholds
-    min_motion_area: int = 50
-    motion_threshold: int = 127
+    min_motion_area: int = 80
+    motion_threshold: int = 140
 
     # Morphological operations (research-optimized)
     enable_morphology: bool = True
@@ -121,7 +121,8 @@ class MotionDetector:
         self,
         image: np.ndarray,
         timestamp: Optional[float] = None,
-        frame_id: Optional[int] = None
+        frame_id: Optional[int] = None,
+        gray_image: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, bool]:
         """
         Detect motion in image.
@@ -137,11 +138,14 @@ class MotionDetector:
         self.frame_count += 1
         self._update_fps(timestamp)
 
-        # Convert to grayscale if needed
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # Convert to grayscale if needed (reuse when provided)
+        if gray_image is not None:
+            gray = gray_image
         else:
-            gray = image
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = image
 
         # ← NEW: Apply CLAHE if enabled
         if self.config.enable_clahe and self.clahe:
@@ -163,8 +167,14 @@ class MotionDetector:
             cv2.THRESH_BINARY
         )
 
+        apply_morphology = (
+            self.config.enable_morphology
+            and self.morph_kernel is not None
+            and self._should_apply_morphology()
+        )
+
         # ← CHANGED: Apply morphology in research-recommended order
-        if self.config.enable_morphology and self.morph_kernel is not None:
+        if apply_morphology:
             # Step 1: Opening (removes small noise)
             motion_mask = cv2.morphologyEx(
                 motion_mask,
@@ -190,6 +200,11 @@ class MotionDetector:
             logger.debug(f"Motion detected: {motion_pixels} pixels")
 
         return motion_mask, has_motion
+
+    @property
+    def current_fps_estimate(self) -> float:
+        """Expose current FPS estimate."""
+        return self.current_fps
 
     def reset(self) -> None:
         """Reset background model."""
@@ -280,3 +295,21 @@ class MotionDetector:
                 self.adaptive_var_threshold,
                 self.adaptive_min_motion_area
             )
+
+    def _should_apply_morphology(self) -> bool:
+        """
+        Skip morphology when FPS is low to save CPU.
+
+        Returns:
+            True if morphology should run
+        """
+        # If FPS is healthy, keep morphology for quality
+        if self.current_fps and self.current_fps >= 18.0:
+            return True
+
+        # When FPS is low, still allow morphology if the scene is busy to avoid noise bursts
+        if self.motion_rate > 30.0:
+            return True
+
+        # Otherwise skip to reduce per-frame cost
+        return False

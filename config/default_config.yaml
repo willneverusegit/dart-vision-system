@@ -51,16 +51,17 @@ board_geometry:
 
 motion_detection:
   history: 500
-  var_threshold: 16.0
+  var_threshold: 24.0
   detect_shadows: false
-  min_motion_area: 50
+  min_motion_area: 80
   enable_morphology: true
   morph_kernel_size: 3
+  motion_threshold: 140
 
 hit_detection:
-  min_contour_area: 10
-  max_contour_area: 300
-  confirmation_frames: 5
+  min_contour_area: 20
+  max_contour_area: 200
+  confirmation_frames: 3
   position_tolerance_px: 10.0
   confirmation_timeout_sec: 3.0
 

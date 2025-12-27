@@ -37,8 +37,8 @@ class StateConfig:
     large_blob_threshold_px: int = 500  # Hand/arm size threshold
 
     # Confirming state
-    confirming_duration_sec: float = 2.0  # How long to search after motion stops
-    confirmation_frames: int = 5  # Frames needed to confirm
+    confirming_duration_sec: float = 1.0  # How long to search after motion stops
+    confirmation_frames: int = 3  # Frames needed to confirm
     confirming_quiet_frames: int = 0  # Require N quiet frames before confirming
 
     # Cooldown state

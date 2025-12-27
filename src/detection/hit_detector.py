@@ -39,7 +39,7 @@ class HitDetectionConfig:
     min_circularity: float = 0.1  # Filter very elongated shapes
 
     # Temporal confirmation
-    confirmation_frames: int = 5
+    confirmation_frames: int = 3
     position_tolerance_px: float = 10.0
     confirmation_timeout_sec: float = 3.0
 
@@ -51,7 +51,7 @@ class HitDetectionConfig:
     # Motion and state configs
     motion_config: MotionConfig = field(default_factory=MotionConfig)
     state_config: StateConfig = field(default_factory=StateConfig)
-    background_history_frames: int = 5  # Quiet frames used for median background
+    background_history_frames: int = 3  # Quiet frames used for median background
 
     # Candidate motion analysis
     max_settling_speed_px_per_sec: float = 1.0
@@ -65,7 +65,7 @@ class HitDetectionConfig:
 
     # Performance and logging
     timing_log_interval_frames: int = 120
-    enable_stage_timing: bool = True
+    enable_stage_timing: bool = False
 
 
 @dataclass
@@ -130,11 +130,13 @@ class EnhancedHitDetector:
         self.last_confirmed_time: Optional[float] = None
 
         # Frame differencing for static object detection
-        self.previous_frame: Optional[np.ndarray] = None
+        self.previous_gray_frame: Optional[np.ndarray] = None
         self.quiet_frame_buffer: List[np.ndarray] = []
         self.consecutive_no_motion_frames: int = 0
         # ← NEU: Store last motion mask for visualization
         self.last_motion_mask: Optional[np.ndarray] = None
+        self._background_cache: Optional[np.ndarray] = None
+        self._background_dirty: bool = True
 
         # Statistics
         self.frames_processed = 0
@@ -165,13 +167,15 @@ class EnhancedHitDetector:
         # Step 0: Preprocess (placeholder for future filters)
         with self._measure_stage("preprocess"):
             processed_image = frame.image
+            gray_image = self._to_grayscale(processed_image)
 
         # Step 1: Motion Detection
         with self._measure_stage("motion"):
             motion_mask, has_motion = self.motion_detector.detect(
                 processed_image,
                 timestamp=timestamp,
-                frame_id=frame_id
+                frame_id=frame_id,
+                gray_image=gray_image
             )
         # ← NEU: Store for visualization
         self.last_motion_mask = motion_mask
@@ -182,7 +186,7 @@ class EnhancedHitDetector:
             self.consecutive_no_motion_frames = 0
         else:
             self.consecutive_no_motion_frames += 1
-            self._update_quiet_background(frame.image)
+            self._update_quiet_background(gray_image)
 
         # Step 2: Update State Machine
         confirmed_hit_pos = None
@@ -211,6 +215,7 @@ class EnhancedHitDetector:
                     hit = self._process_confirming_state(
                         frame,
                         motion_mask,
+                        current_gray=gray_image,
                         background_frame=background_frame
                     )
 
@@ -227,7 +232,7 @@ class EnhancedHitDetector:
         self._cleanup_stale_candidates(frame_id, timestamp or time.time())
 
         # Store frame for differencing
-        self.previous_frame = processed_image.copy()
+        self.previous_gray_frame = gray_image.copy()
 
         # Periodic timing log for visibility
         self._maybe_log_timing(frame_id)
@@ -238,6 +243,7 @@ class EnhancedHitDetector:
         self,
         frame,
         motion_mask: np.ndarray,
+        current_gray: np.ndarray,
         background_frame: Optional[np.ndarray] = None
     ) -> Optional[Hit]:
         """
@@ -254,9 +260,9 @@ class EnhancedHitDetector:
         """
         # Frame differencing: Find new objects
         if background_frame is not None:
-            new_objects_mask = self._find_new_objects(frame.image, background_frame)
-        elif self.previous_frame is not None:
-            new_objects_mask = self._find_new_objects(frame.image, self.previous_frame)
+            new_objects_mask = self._find_new_objects(current_gray, background_frame)
+        elif self.previous_gray_frame is not None:
+            new_objects_mask = self._find_new_objects(current_gray, self.previous_gray_frame)
         else:
             new_objects_mask = motion_mask
 
@@ -270,22 +276,26 @@ class EnhancedHitDetector:
         for contour in contours:
             # Get refined tip position
             cx, cy = self._get_dart_tip_position(contour, frame.image)
+            cx_full, cy_full = cx, cy
+            transform = getattr(frame, "transform", None)
+            if transform is not None:
+                cx_full, cy_full = transform.to_full_coords(cx, cy)
 
             # Check if within board
-            if not self.mapper.is_valid_hit(cx, cy):
+            if not self.mapper.is_valid_hit(cx_full, cy_full):
                 continue
 
             # Check if in cooldown zone
-            if self.state_machine.is_in_cooldown_zone(cx, cy):
-                logger.debug(f"Position ({cx:.0f}, {cy:.0f}) in cooldown zone")
+            if self.state_machine.is_in_cooldown_zone(cx_full, cy_full):
+                logger.debug(f"Position ({cx_full:.0f}, {cy_full:.0f}) in cooldown zone")
                 continue
 
             # Additional gating vs last confirmed hit
-            if not self._passes_last_hit_constraints(cx, cy, frame.frame_id):
+            if not self._passes_last_hit_constraints(cx_full, cy_full, frame.frame_id):
                 continue
 
             # Track or create candidate
-            hit = self._track_candidate(cx, cy, frame.frame_id, frame.timestamp)
+            hit = self._track_candidate(cx_full, cy_full, frame.frame_id, frame.timestamp)
 
             if hit:
                 return hit
@@ -453,8 +463,8 @@ class EnhancedHitDetector:
         return True
     def _find_new_objects(
         self,
-        current_frame: np.ndarray,
-        background_frame: np.ndarray
+        current_gray: np.ndarray,
+        background_gray: np.ndarray
     ) -> np.ndarray:
         """
         Find new static objects using frame differencing.
@@ -468,11 +478,8 @@ class EnhancedHitDetector:
         Returns:
             Binary mask of new objects
         """
-        current_gray = self._to_grayscale(current_frame)
-        previous_gray = self._to_grayscale(background_frame)
-
         # Absolute difference
-        diff = cv2.absdiff(current_gray, previous_gray)
+        diff = cv2.absdiff(current_gray, background_gray)
 
         # Threshold
         _, diff_mask = cv2.threshold(diff, 15, 255, cv2.THRESH_BINARY)
@@ -566,6 +573,7 @@ class EnhancedHitDetector:
         Returns:
             (x, y) position of dart tip
         """
+        contour_area = cv2.contourArea(contour)
         # Method 1: Contour center
         M = cv2.moments(contour)
         if M["m00"] == 0:
@@ -612,7 +620,7 @@ class EnhancedHitDetector:
         cy_tip = float(tip_point[1])
 
         # Method 3: Sub-pixel refinement (research-based)
-        if self.config.enable_subpixel:
+        if self._should_use_subpixel(contour_area):
             # Convert to grayscale if needed
             if len(image.shape) == 3:
                 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -651,6 +659,26 @@ class EnhancedHitDetector:
         cy = 0.2 * cy_center + 0.8 * cy_tip
 
         return (cx, cy)
+
+    def _should_use_subpixel(self, contour_area: float) -> bool:
+        """
+        Decide whether to run sub-pixel refinement.
+
+        Skips refinement on low-FPS scenarios or obviously large contours to save CPU.
+        """
+        if not self.config.enable_subpixel:
+            return False
+
+        # When FPS drops, skip refinement to keep latency down
+        fps = self.motion_detector.current_fps_estimate
+        if fps and fps < 18.0:
+            return False
+
+        # Very large contours (hand/board bleed) do not need subpixel
+        if contour_area > (self.config.max_contour_area * 0.8):
+            return False
+
+        return True
 
     def _track_candidate(
         self,
@@ -758,13 +786,15 @@ class EnhancedHitDetector:
         self.motion_detector.reset()
         self.state_machine.reset()
         self.candidates.clear()
-        self.previous_frame = None
+        self.previous_gray_frame = None
         self.quiet_frame_buffer.clear()
         self.consecutive_no_motion_frames = 0
         self.last_confirmed_hit = None
         self.last_confirmed_frame_id = None
         self.last_confirmed_time = None
         self.confirmed_hits.clear()
+        self._background_cache = None
+        self._background_dirty = True
         if self.performance_monitor:
             self.performance_monitor.reset()
         logger.info("Detector reset")
@@ -793,13 +823,17 @@ class EnhancedHitDetector:
             "timing_ms": timing_report,
         }
 
-    def _update_quiet_background(self, frame: np.ndarray) -> None:
+    def _update_quiet_background(self, gray_frame: np.ndarray) -> None:
         """Store quiet frames for background estimation."""
         if self.config.background_history_frames <= 0:
             return
 
-        gray_frame = self._to_grayscale(frame).copy()
+        if len(gray_frame.shape) == 3:
+            gray_frame = cv2.cvtColor(gray_frame, cv2.COLOR_BGR2GRAY)
+
         self.quiet_frame_buffer.append(gray_frame)
+        self._background_dirty = True
+        self._background_cache = None
 
         if len(self.quiet_frame_buffer) > self.config.background_history_frames:
             self.quiet_frame_buffer.pop(0)
@@ -809,9 +843,14 @@ class EnhancedHitDetector:
         if not self.quiet_frame_buffer:
             return None
 
+        if self._background_cache is not None and not self._background_dirty:
+            return self._background_cache
+
         stack = np.stack(self.quiet_frame_buffer, axis=0)
         median_background = np.median(stack, axis=0).astype(np.uint8)
-        return median_background
+        self._background_cache = median_background
+        self._background_dirty = False
+        return self._background_cache
 
     @staticmethod
     def _to_grayscale(frame: np.ndarray) -> np.ndarray:

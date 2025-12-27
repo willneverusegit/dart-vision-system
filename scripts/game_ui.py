@@ -27,7 +27,7 @@ import time
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.capture import ThreadedCamera, CameraConfig
-from src.core import CalibrationData, load_yaml, BoardGeometry, Hit
+from src.core import CalibrationData, Frame, load_yaml, BoardGeometry, Hit
 from src.board import DartboardMapper, BoardVisualizer
 from src.detection import HitDetector, HitDetectionConfig
 from src.game import GameState, Mode501, ModeTraining, Player
@@ -276,9 +276,9 @@ class GameScreen(ttk.Frame):
         )
 
         self.preprocessing = PreprocessingPipeline(
-            roi_extractor=None,  # ROI wird manuell angewendet
-            target_width=None,  # Keine extra downscaling in GUI
-            enable_grayscale=False,  # GUI braucht Farbe
+            roi_extractor=self.roi_extractor,
+            target_width=640,  # Low-compute detection path
+            enable_grayscale=True,  # Detection prefers grayscale
             enable_clahe=False
         )
 
@@ -478,16 +478,17 @@ class GameScreen(ttk.Frame):
 
         # For detection: use ROI
         if self.input_mode == "auto" and self.hit_detector:
-            # Extract ROI for faster detection
-            warped_roi, roi = self.roi_extractor.extract_roi(warped_full)
+            # Extract ROI + downscale + grayscale for faster detection
+            processed, roi, transform = self.preprocessing.process(warped_full)
 
-            # Create detection frame with ROI
-            self.current_frame = type('Frame', (), {
-                'image': warped_roi,
-                'frame_id': frame.frame_id,
-                'timestamp': frame.timestamp,
-                'fps': frame.fps
-            })()
+            # Create detection frame with ROI metadata
+            self.current_frame = Frame(
+                image=processed,
+                frame_id=frame.frame_id,
+                timestamp=frame.timestamp,
+                fps=frame.fps,
+                transform=transform
+            )
 
         # For display: use full warped
         display = warped_full

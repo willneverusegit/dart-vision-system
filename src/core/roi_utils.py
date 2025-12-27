@@ -6,7 +6,7 @@ from typing import Tuple, Optional
 import cv2
 import logging
 
-from .types import ROI, CalibrationData
+from .types import ROI, CalibrationData, FrameTransform
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,7 @@ class PreprocessingPipeline:
     def process(
             self,
             image: np.ndarray
-    ) -> Tuple[np.ndarray, Optional[ROI]]:
+    ) -> Tuple[np.ndarray, Optional[ROI], FrameTransform]:
         """
         Process image through pipeline.
 
@@ -194,26 +194,33 @@ class PreprocessingPipeline:
             image: Input image (BGR or grayscale)
 
         Returns:
-            (processed_image, roi) where roi is None if not used
+            (processed_image, roi, transform) where roi is None if not used
         """
         processed = image
         roi = None
+        transform = FrameTransform()
 
         # Step 1: ROI cropping (biggest win)
         if self.roi_extractor:
             processed, roi = self.roi_extractor.extract_roi(processed)
+            transform.offset = (roi.x, roi.y)
+            transform.roi = roi
 
         # Step 2: Downscaling
         if self.target_width and processed.shape[1] > self.target_width:
             h, w = processed.shape[:2]
             aspect_ratio = h / w
             target_height = int(self.target_width * aspect_ratio)
+            scale = self.target_width / w
+            transform.scale = scale
 
             processed = cv2.resize(
                 processed,
                 (self.target_width, target_height),
                 interpolation=cv2.INTER_AREA
             )
+        else:
+            transform.scale = 1.0
 
         # Step 3: Grayscale conversion
         if self.enable_grayscale and len(processed.shape) == 3:
@@ -226,4 +233,12 @@ class PreprocessingPipeline:
                 processed = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
             processed = self.clahe.apply(processed)
 
-        return processed, roi
+        if self.roi_extractor:
+            # Keep mm_per_pixel in sync with scaling
+            mm_per_pixel = self.roi_extractor.calibration.mm_per_pixel
+            if transform.scale:
+                transform.effective_mm_per_pixel = mm_per_pixel / transform.scale
+            else:
+                transform.effective_mm_per_pixel = mm_per_pixel
+
+        return processed, roi, transform
