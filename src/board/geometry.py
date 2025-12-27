@@ -208,6 +208,21 @@ class DartboardMapper:
 
         return hit
 
+    def ring_for_position(self, x: float, y: float) -> Tuple[str, float]:
+        """
+        Determine ring name and radius for a pixel position.
+
+        Args:
+            x: X coordinate in pixels
+            y: Y coordinate in pixels
+
+        Returns:
+            (ring_name, radius_in_px)
+        """
+        radius, _ = self.pixel_to_polar(x, y)
+        ring_name, _ = self.radius_to_ring(radius)
+        return ring_name, radius
+
     def is_valid_hit(self, x: float, y: float) -> bool:
         """
         Check if coordinates are within board boundaries.

@@ -51,6 +51,16 @@ class HitDetectionConfig:
     state_config: StateConfig = field(default_factory=StateConfig)
     background_history_frames: int = 5  # Quiet frames used for median background
 
+    # Candidate motion analysis
+    max_settling_speed_px_per_sec: float = 1.0
+    velocity_settling_frames: int = 3
+    reverse_motion_dot_threshold: float = -0.3
+
+    # Spacing and plausibility
+    min_frames_since_hit: int = 2
+    min_pixel_drift_since_hit: float = 8.0
+    entry_angle_tolerance_deg: float = 70.0
+
 
 @dataclass
 class HitCandidate:
@@ -61,6 +71,9 @@ class HitCandidate:
     confirmation_count: int = 0
     last_seen_frame: int = 0
     last_seen_time: float = 0.0
+    positions: List[Tuple[float, float]] = field(default_factory=list)
+    velocity_history: List[float] = field(default_factory=list)
+    last_motion_vector: Optional[Tuple[float, float]] = None
 
 
 class EnhancedHitDetector:
@@ -105,6 +118,9 @@ class EnhancedHitDetector:
 
         # Candidate tracking
         self.candidates: List[HitCandidate] = []
+        self.last_confirmed_hit: Optional[Hit] = None
+        self.last_confirmed_frame_id: Optional[int] = None
+        self.last_confirmed_time: Optional[float] = None
 
         # Frame differencing for static object detection
         self.previous_frame: Optional[np.ndarray] = None
@@ -151,14 +167,15 @@ class EnhancedHitDetector:
         current_state = self.state_machine.update(
             has_motion=has_motion,
             motion_pixels=motion_pixels,
-            confirmed_hit=confirmed_hit_pos  # Will be set if we confirm a hit
+            confirmed_hit=confirmed_hit_pos,  # Will be set if we confirm a hit
+            frame_id=frame.frame_id
         )
 
         # Step 3: Process based on state
         hit = None
 
         if current_state == DetectionState.CONFIRMING:
-            quiet_needed = self.config.state_config.confirming_quiet_frames
+            quiet_needed = getattr(self.config.state_config, "confirming_quiet_frames", 0)
             if quiet_needed and self.consecutive_no_motion_frames < quiet_needed:
                 logger.debug(
                     "Waiting for quiet frames before confirming: %d/%d",
@@ -179,7 +196,8 @@ class EnhancedHitDetector:
                 self.state_machine.update(
                     has_motion=has_motion,
                     motion_pixels=motion_pixels,
-                    confirmed_hit=(hit.x, hit.y)
+                    confirmed_hit=(hit.x, hit.y),
+                    frame_id=frame.frame_id
                 )
 
         # Cleanup stale candidates
@@ -204,7 +222,6 @@ class EnhancedHitDetector:
         Args:
             frame: Input frame
             motion_mask: Current motion mask
-            background_frame: Median quiet background frame if available
 
         Returns:
             Confirmed hit or None
@@ -237,6 +254,10 @@ class EnhancedHitDetector:
                 logger.debug(f"Position ({cx:.0f}, {cy:.0f}) in cooldown zone")
                 continue
 
+            # Additional gating vs last confirmed hit
+            if not self._passes_last_hit_constraints(cx, cy, frame.frame_id):
+                continue
+
             # Track or create candidate
             hit = self._track_candidate(cx, cy, frame.frame_id, frame.timestamp)
 
@@ -245,6 +266,165 @@ class EnhancedHitDetector:
 
         return None
 
+    def _find_matching_candidate(self, x: float, y: float) -> Optional[HitCandidate]:
+        """Find existing candidate within tolerance."""
+        for candidate in self.candidates:
+            dx = abs(x - candidate.position[0])
+            dy = abs(y - candidate.position[1])
+            distance = (dx ** 2 + dy ** 2) ** 0.5
+
+            if distance <= self.config.position_tolerance_px:
+                return candidate
+
+        return None
+
+    def _is_reverse_motion(
+        self,
+        previous_vector: Optional[Tuple[float, float]],
+        current_vector: Tuple[float, float]
+    ) -> bool:
+        """Check if motion reverses direction (likely noise/reflection)."""
+        if previous_vector is None:
+            return False
+
+        prev_norm = (previous_vector[0] ** 2 + previous_vector[1] ** 2) ** 0.5
+        curr_norm = (current_vector[0] ** 2 + current_vector[1] ** 2) ** 0.5
+        if prev_norm == 0 or curr_norm == 0:
+            return False
+
+        cos_sim = (
+            (previous_vector[0] * current_vector[0]) +
+            (previous_vector[1] * current_vector[1])
+        ) / (prev_norm * curr_norm)
+
+        return cos_sim < self.config.reverse_motion_dot_threshold
+
+    def _has_settled_speed(self, candidate: HitCandidate) -> bool:
+        """
+        Require velocity to trend toward zero before confirming.
+
+        Prevents sliding/blurring artifacts from being accepted.
+        """
+        if not candidate.velocity_history:
+            return True
+
+        sample_len = min(
+            self.config.velocity_settling_frames,
+            len(candidate.velocity_history)
+        )
+
+        recent = candidate.velocity_history[-sample_len:]
+        return max(recent) <= self.config.max_settling_speed_px_per_sec
+
+    def _passes_entry_angle(self, candidate: HitCandidate) -> bool:
+        """
+        Ensure candidate path points toward board center (plausible entry).
+
+        Uses simple line fit between first and latest positions.
+        """
+        if len(candidate.positions) < 2:
+            return True
+
+        start = candidate.positions[0]
+        end = candidate.positions[-1]
+        approach_vector = (end[0] - start[0], end[1] - start[1])
+
+        center_vector = (
+            self.mapper.center[0] - end[0],
+            self.mapper.center[1] - end[1]
+        )
+
+        approach_norm = (approach_vector[0] ** 2 + approach_vector[1] ** 2) ** 0.5
+        center_norm = (center_vector[0] ** 2 + center_vector[1] ** 2) ** 0.5
+
+        if approach_norm == 0 or center_norm == 0:
+            return True
+
+        cos_sim = (
+            (approach_vector[0] * center_vector[0]) +
+            (approach_vector[1] * center_vector[1])
+        ) / (approach_norm * center_norm)
+
+        cos_sim = np.clip(cos_sim, -1.0, 1.0)
+        angle = np.degrees(np.arccos(cos_sim))
+        return angle <= self.config.entry_angle_tolerance_deg
+
+    def _can_accept_hit(self, hit: Hit, frame_id: int) -> bool:
+        """
+        Enforce spacing and plausibility before emitting hit.
+        """
+        if self.last_confirmed_hit:
+            if (
+                self.last_confirmed_frame_id is not None and
+                (frame_id - self.last_confirmed_frame_id) < self.config.min_frames_since_hit
+            ):
+                logger.debug("Hit rejected: too few frames since last hit")
+                return False
+
+            drift = (
+                (hit.x_px - self.last_confirmed_hit.x_px) ** 2 +
+                (hit.y_px - self.last_confirmed_hit.y_px) ** 2
+            ) ** 0.5
+            if drift < self.config.min_pixel_drift_since_hit:
+                logger.debug("Hit rejected: insufficient pixel drift since last hit")
+                return False
+
+        return True
+
+    def _passes_last_hit_constraints(
+            self,
+            x: float,
+            y: float,
+            frame_id: int
+    ) -> bool:
+        """
+        Gate new candidates against last confirmed hit position/ring.
+        """
+        if self.last_confirmed_hit is None:
+            return True
+
+        # Temporal spacing
+        if self.last_confirmed_frame_id is not None:
+            if (frame_id - self.last_confirmed_frame_id) < self.config.min_frames_since_hit:
+                logger.debug("Candidate discarded: within min frame spacing of last hit")
+                return False
+
+        # Spatial/ring spacing
+        distance = (
+            (x - self.last_confirmed_hit.x_px) ** 2 +
+            (y - self.last_confirmed_hit.y_px) ** 2
+        ) ** 0.5
+        if distance < max(
+            self.state_machine.config.cooldown_radius_px,
+            self.config.min_pixel_drift_since_hit
+        ):
+            logger.debug("Candidate discarded: within cooldown/spacing radius")
+            return False
+
+        candidate_ring, candidate_radius = self.mapper.ring_for_position(x, y)
+        last_ring, last_radius = self.mapper.ring_for_position(
+            self.last_confirmed_hit.x_px,
+            self.last_confirmed_hit.y_px
+        )
+        if (
+            candidate_ring == last_ring and
+            abs(candidate_radius - last_radius) < self.config.min_pixel_drift_since_hit
+        ):
+            logger.debug("Candidate discarded: same ring without sufficient radial change")
+            return False
+
+        # Entry angle plausibility relative to radial direction
+        radius, angle = self.mapper.pixel_to_polar(x, y)
+        _, last_angle = self.mapper.pixel_to_polar(
+            self.last_confirmed_hit.x_px,
+            self.last_confirmed_hit.y_px
+        )
+        angle_diff = abs((angle - last_angle + 180) % 360 - 180)
+        if angle_diff > self.config.entry_angle_tolerance_deg * 2:
+            logger.debug("Candidate discarded: angle too far from prior entry corridor")
+            return False
+
+        return True
     def _find_new_objects(
         self,
         current_frame: np.ndarray,
@@ -464,32 +644,52 @@ class EnhancedHitDetector:
         Returns:
             Hit if confirmed, None otherwise
         """
-        # Find matching candidate
-        matched_candidate = None
-
-        for candidate in self.candidates:
-            dx = abs(x - candidate.position[0])
-            dy = abs(y - candidate.position[1])
-            distance = (dx**2 + dy**2)**0.5
-
-            if distance <= self.config.position_tolerance_px:
-                matched_candidate = candidate
-                break
+        matched_candidate = self._find_matching_candidate(x, y)
 
         if matched_candidate:
-            # Update existing candidate
+            # Motion analysis
+            motion_vector = (
+                x - matched_candidate.position[0],
+                y - matched_candidate.position[1]
+            )
+            dt = max(timestamp - matched_candidate.last_seen_time, 1e-3)
+            speed = (motion_vector[0] ** 2 + motion_vector[1] ** 2) ** 0.5 / dt
+
+            if self._is_reverse_motion(matched_candidate.last_motion_vector, motion_vector):
+                logger.debug("Candidate rejected due to reverse motion")
+                self.candidates.remove(matched_candidate)
+                return None
+
+            matched_candidate.velocity_history.append(speed)
+            matched_candidate.positions.append((x, y))
+            matched_candidate.last_motion_vector = motion_vector
+
+            # Update positional info
+            matched_candidate.position = (x, y)
             matched_candidate.confirmation_count += 1
             matched_candidate.last_seen_frame = frame_id
             matched_candidate.last_seen_time = timestamp
 
-            # Check if confirmed
-            if matched_candidate.confirmation_count >= self.config.confirmation_frames:
-                # Remove from candidates
-                self.candidates.remove(matched_candidate)
+            if not self._has_settled_speed(matched_candidate):
+                return None
 
+            if not self._passes_entry_angle(matched_candidate):
+                return None
+
+            if matched_candidate.confirmation_count >= self.config.confirmation_frames:
                 # Create hit
-                hit = self.mapper.pixel_to_score(x, y)
+                hit = self.mapper.pixel_to_score(x, y, frame_id=frame_id, timestamp=timestamp)
+
+                if not self._can_accept_hit(hit, frame_id):
+                    # Remove noisy candidate
+                    self.candidates.remove(matched_candidate)
+                    return None
+
+                self.candidates.remove(matched_candidate)
                 self.hits_confirmed += 1
+                self.last_confirmed_hit = hit
+                self.last_confirmed_frame_id = frame_id
+                self.last_confirmed_time = timestamp
 
                 logger.info(
                     f"Hit confirmed: {hit.score} points at ({x:.1f}, {y:.1f}) "
@@ -506,7 +706,8 @@ class EnhancedHitDetector:
                 first_seen_time=timestamp,
                 confirmation_count=1,
                 last_seen_frame=frame_id,
-                last_seen_time=timestamp
+                last_seen_time=timestamp,
+                positions=[(x, y)],
             )
             self.candidates.append(candidate)
             self.candidates_created += 1
@@ -532,6 +733,9 @@ class EnhancedHitDetector:
         self.previous_frame = None
         self.quiet_frame_buffer.clear()
         self.consecutive_no_motion_frames = 0
+        self.last_confirmed_hit = None
+        self.last_confirmed_frame_id = None
+        self.last_confirmed_time = None
         logger.info("Detector reset")
 
     def get_stats(self) -> dict:
@@ -550,6 +754,8 @@ class EnhancedHitDetector:
             "hits_confirmed": self.hits_confirmed,
             "confirmation_rate_percent": confirmation_rate,
             "active_candidates": len(self.candidates),
+            "last_confirmed_frame_id": self.last_confirmed_frame_id,
+            "last_confirmed_time": self.last_confirmed_time,
             "quiet_frame_buffer": len(self.quiet_frame_buffer),
             "consecutive_no_motion_frames": self.consecutive_no_motion_frames,
         }

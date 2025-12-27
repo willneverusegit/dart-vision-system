@@ -39,11 +39,15 @@ class StateConfig:
     # Confirming state
     confirming_duration_sec: float = 2.0  # How long to search after motion stops
     confirmation_frames: int = 5  # Frames needed to confirm
-    confirming_quiet_frames: int = 2  # Require N quiet frames before confirming
+    confirming_quiet_frames: int = 0  # Require N quiet frames before confirming
 
     # Cooldown state
     cooldown_duration_sec: float = 1.0  # Cooldown after confirmed hit
     cooldown_radius_px: float = 100.0  # Ignore hits within this radius
+
+    # Flicker/spacing protection
+    min_frames_since_hit: int = 2  # Ignore new hits for this many frames
+    min_pixel_drift_px: float = 5.0  # Require drift to accept next hit
 
 
 class DetectionStateMachine:
@@ -75,6 +79,7 @@ class DetectionStateMachine:
         # State-specific data
         self.last_hit_position: Optional[tuple] = None
         self.last_hit_time: Optional[float] = None
+        self.last_hit_frame_id: Optional[int] = None
 
         # Statistics
         self.state_transitions = 0
@@ -82,8 +87,7 @@ class DetectionStateMachine:
         logger.info(
             f"StateMachine initialized: "
             f"watching={self.config.watching_duration_sec}s, "
-            f"confirming={self.config.confirming_duration_sec}s "
-            f"(quiet_frames={self.config.confirming_quiet_frames}), "
+            f"confirming={self.config.confirming_duration_sec}s, "
             f"cooldown={self.config.cooldown_duration_sec}s"
         )
 
@@ -91,7 +95,8 @@ class DetectionStateMachine:
             self,
             has_motion: bool,
             motion_pixels: int = 0,
-            confirmed_hit: Optional[tuple] = None
+            confirmed_hit: Optional[tuple] = None,
+            frame_id: Optional[int] = None
     ) -> DetectionState:
         """
         Update state machine.
@@ -131,9 +136,13 @@ class DetectionStateMachine:
         elif self.state == DetectionState.CONFIRMING:
             # Hit confirmed
             if confirmed_hit:
-                self.last_hit_position = confirmed_hit
-                self.last_hit_time = current_time
-                self._transition_to(DetectionState.COOLDOWN)
+                if self._should_block_hit(confirmed_hit, frame_id):
+                    logger.debug("Hit rejected by spacing constraints")
+                else:
+                    self.last_hit_position = confirmed_hit
+                    self.last_hit_time = current_time
+                    self.last_hit_frame_id = frame_id
+                    self._transition_to(DetectionState.COOLDOWN)
 
             # Timeout without confirmation
             elif time_in_state > self.config.confirming_duration_sec:
@@ -196,6 +205,7 @@ class DetectionStateMachine:
         self.state_start_time = time.time()
         self.last_hit_position = None
         self.last_hit_time = None
+        self.last_hit_frame_id = None
         logger.info("State machine reset")
 
     def get_stats(self) -> dict:
@@ -205,4 +215,35 @@ class DetectionStateMachine:
             "state_transitions": self.state_transitions,
             "time_in_state": time.time() - self.state_start_time,
             "last_hit_time": self.last_hit_time,
+            "last_hit_frame_id": self.last_hit_frame_id,
         }
+
+    def _should_block_hit(
+            self,
+            confirmed_hit: tuple,
+            frame_id: Optional[int]
+    ) -> bool:
+        """
+        Guard against flicker/duplicate hits too close in time/space.
+
+        Args:
+            confirmed_hit: (x, y) tuple
+            frame_id: Optional frame id for temporal spacing
+
+        Returns:
+            True if hit should be blocked
+        """
+        if self.last_hit_position is None:
+            return False
+
+        # Temporal spacing
+        if frame_id is not None and self.last_hit_frame_id is not None:
+            if (frame_id - self.last_hit_frame_id) < self.config.min_frames_since_hit:
+                return True
+
+        # Spatial spacing
+        last_x, last_y = self.last_hit_position
+        x, y = confirmed_hit
+
+        distance = ((x - last_x) ** 2 + (y - last_y) ** 2) ** 0.5
+        return distance < self.config.min_pixel_drift_px
