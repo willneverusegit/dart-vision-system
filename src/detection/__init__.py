@@ -11,6 +11,7 @@ from .hit_detector import (
     EnhancedHitDetector as HitDetector,  # Use enhanced version
     HitDetectionConfig,
 )
+from .simple_hit_detector import SimpleHitDetector
 
 __all__ = [
     "MotionDetector",
@@ -20,4 +21,5 @@ __all__ = [
     "StateConfig",
     "HitDetector",
     "HitDetectionConfig",
+    "SimpleHitDetector",  # New simplified detector
 ]
