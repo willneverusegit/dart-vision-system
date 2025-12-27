@@ -14,8 +14,10 @@ from typing import List, Optional, Tuple
 from dataclasses import dataclass, field
 import time
 import logging
+from contextlib import nullcontext
 
 from src.core import Hit
+from src.core.performance_monitor import PerformanceMonitor
 from src.board import DartboardMapper
 from .motion import MotionDetector, MotionConfig
 from .detection_state import DetectionStateMachine, StateConfig, DetectionState
@@ -60,6 +62,10 @@ class HitDetectionConfig:
     min_frames_since_hit: int = 2
     min_pixel_drift_since_hit: float = 8.0
     entry_angle_tolerance_deg: float = 70.0
+
+    # Performance and logging
+    timing_log_interval_frames: int = 120
+    enable_stage_timing: bool = True
 
 
 @dataclass
@@ -118,6 +124,7 @@ class EnhancedHitDetector:
 
         # Candidate tracking
         self.candidates: List[HitCandidate] = []
+        self.confirmed_hits: List[Hit] = []
         self.last_confirmed_hit: Optional[Hit] = None
         self.last_confirmed_frame_id: Optional[int] = None
         self.last_confirmed_time: Optional[float] = None
@@ -135,6 +142,9 @@ class EnhancedHitDetector:
         self.candidates_created = 0
         self.hits_confirmed = 0
 
+        # Performance monitoring
+        self.performance_monitor = PerformanceMonitor() if self.config.enable_stage_timing else None
+
         logger.info("EnhancedHitDetector initialized with state machine")
 
     def detect(self, frame) -> Optional[Hit]:
@@ -149,8 +159,20 @@ class EnhancedHitDetector:
         """
         self.frames_processed += 1
 
+        timestamp = getattr(frame, "timestamp", None)
+        frame_id = getattr(frame, "frame_id", 0) or 0
+
+        # Step 0: Preprocess (placeholder for future filters)
+        with self._measure_stage("preprocess"):
+            processed_image = frame.image
+
         # Step 1: Motion Detection
-        motion_mask, has_motion = self.motion_detector.detect(frame.image)
+        with self._measure_stage("motion"):
+            motion_mask, has_motion = self.motion_detector.detect(
+                processed_image,
+                timestamp=timestamp,
+                frame_id=frame_id
+            )
         # ← NEU: Store for visualization
         self.last_motion_mask = motion_mask
         motion_pixels = cv2.countNonZero(motion_mask) if has_motion else 0
@@ -185,11 +207,12 @@ class EnhancedHitDetector:
             else:
                 # This is the critical phase: search for new dart
                 background_frame = self._get_background_frame()
-                hit = self._process_confirming_state(
-                    frame,
-                    motion_mask,
-                    background_frame=background_frame
-                )
+                with self._measure_stage("contour"):
+                    hit = self._process_confirming_state(
+                        frame,
+                        motion_mask,
+                        background_frame=background_frame
+                    )
 
             if hit:
                 # Update state machine with confirmed position
@@ -201,10 +224,13 @@ class EnhancedHitDetector:
                 )
 
         # Cleanup stale candidates
-        self._cleanup_stale_candidates(frame.frame_id, frame.timestamp)
+        self._cleanup_stale_candidates(frame_id, timestamp or time.time())
 
         # Store frame for differencing
-        self.previous_frame = frame.image.copy()
+        self.previous_frame = processed_image.copy()
+
+        # Periodic timing log for visibility
+        self._maybe_log_timing(frame_id)
 
         return hit
 
@@ -678,7 +704,8 @@ class EnhancedHitDetector:
 
             if matched_candidate.confirmation_count >= self.config.confirmation_frames:
                 # Create hit
-                hit = self.mapper.pixel_to_score(x, y, frame_id=frame_id, timestamp=timestamp)
+                with self._measure_stage("scoring"):
+                    hit = self.mapper.pixel_to_score(x, y, frame_id=frame_id, timestamp=timestamp)
 
                 if not self._can_accept_hit(hit, frame_id):
                     # Remove noisy candidate
@@ -687,6 +714,7 @@ class EnhancedHitDetector:
 
                 self.candidates.remove(matched_candidate)
                 self.hits_confirmed += 1
+                self.confirmed_hits.append(hit)
                 self.last_confirmed_hit = hit
                 self.last_confirmed_frame_id = frame_id
                 self.last_confirmed_time = timestamp
@@ -736,12 +764,16 @@ class EnhancedHitDetector:
         self.last_confirmed_hit = None
         self.last_confirmed_frame_id = None
         self.last_confirmed_time = None
+        self.confirmed_hits.clear()
+        if self.performance_monitor:
+            self.performance_monitor.reset()
         logger.info("Detector reset")
 
     def get_stats(self) -> dict:
         """Get detection statistics."""
         motion_stats = self.motion_detector.get_stats()
         state_stats = self.state_machine.get_stats()
+        timing_report = self.get_performance_report()
 
         confirmation_rate = 0.0
         if self.candidates_created > 0:
@@ -758,6 +790,7 @@ class EnhancedHitDetector:
             "last_confirmed_time": self.last_confirmed_time,
             "quiet_frame_buffer": len(self.quiet_frame_buffer),
             "consecutive_no_motion_frames": self.consecutive_no_motion_frames,
+            "timing_ms": timing_report,
         }
 
     def _update_quiet_background(self, frame: np.ndarray) -> None:
@@ -786,3 +819,43 @@ class EnhancedHitDetector:
         if len(frame.shape) == 3:
             return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return frame
+
+    def get_performance_report(self) -> dict:
+        """Expose performance timings for pipeline stages."""
+        if not self.performance_monitor:
+            return {}
+        return self.performance_monitor.get_report()
+
+    def _measure_stage(self, name: str):
+        """Context manager for stage timing with graceful disable."""
+        if self.performance_monitor:
+            return self.performance_monitor.measure(name)
+        return nullcontext()
+
+    def _maybe_log_timing(self, frame_id: int) -> None:
+        """Periodically log stage timings and adaptive thresholds."""
+        interval = getattr(self.config, "timing_log_interval_frames", 0)
+        if not interval or not self.performance_monitor:
+            return
+
+        if frame_id <= 0 or frame_id % interval != 0:
+            return
+
+        report = self.performance_monitor.get_report()
+        if not report:
+            return
+
+        stage_summary = ", ".join(
+            f"{name}:{stats.get('recent_avg_ms', 0.0):.2f}ms"
+            for name, stats in sorted(report.items())
+        )
+        motion_stats = self.motion_detector.get_stats()
+        logger.info(
+            "Pipeline timing @frame %d → %s | fps=%.1f motion=%.1f%% varThr=%.1f minArea=%d",
+            frame_id,
+            stage_summary,
+            motion_stats.get("fps_estimate", 0.0),
+            motion_stats.get("motion_rate_percent", 0.0),
+            motion_stats.get("var_threshold", 0.0),
+            motion_stats.get("min_motion_area", 0),
+        )

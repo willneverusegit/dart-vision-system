@@ -23,7 +23,7 @@ def test_motion_detector_init():
     """Test MotionDetector initialization."""
     detector = MotionDetector()
 
-    assert detector.config.history == 500
+    assert detector.config.history == 150
     assert detector.frame_count == 0
     assert detector.motion_detected_count == 0
 
@@ -77,9 +77,8 @@ def test_motion_detector_reset():
     assert detector.frame_count == 1
 
     detector.reset()
-    # Frame count should persist (it's a statistic)
-    # But background model is reset
-    assert detector.frame_count == 1
+    # Background model is reset and statistics cleared
+    assert detector.frame_count == 0
 
 
 def test_motion_detector_stats():
@@ -275,6 +274,7 @@ def test_hit_detector_stats():
     assert "candidates_created" in stats
     assert "hits_confirmed" in stats
     assert "confirmation_rate_percent" in stats
+    assert "timing_ms" in stats
 
 
 if __name__ == "__main__":

@@ -23,7 +23,8 @@ import argparse
 from pathlib import Path
 import numpy as np
 import time
-from typing import Optional, List
+import csv
+from typing import Optional, List, Dict
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -59,6 +60,8 @@ class LiveDemo:
             show_debug: bool = False,
             enable_profiling: bool = False,
             adaptive_fps: bool = True,
+            stats_csv: Optional[str] = None,
+            stats_interval: int = 60,
     ):
         """
         Initialize live demo.
@@ -95,6 +98,8 @@ class LiveDemo:
         self.show_overlay = True
         self.show_motion = False
         self.paused = False
+        self.latest_detector_stats: Dict[str, float] = {}
+        self.latest_timing_report: Dict[str, dict] = {}
 
         # Performance tracking
         self.fps_start_time = time.time()
@@ -118,9 +123,37 @@ class LiveDemo:
         else:
             self.fps_limiter = None
 
+        # Stats export
+        self.stats_export_interval = max(stats_interval, 1)
+        self._stats_csv_writer = None
+        self._stats_csv_file = None
+        self._last_export_frame = 0
+        if stats_csv:
+            csv_path = Path(stats_csv)
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            self._stats_csv_file = csv_path.open("w", newline="")
+            fieldnames = [
+                "frame_id",
+                "timestamp",
+                "camera_fps",
+                "display_fps",
+                "state",
+                "motion_rate_percent",
+                "var_threshold",
+                "min_motion_area",
+                "preprocess_ms",
+                "motion_ms",
+                "contour_ms",
+                "scoring_ms",
+                "hits",
+                "total_score",
+            ]
+            self._stats_csv_writer = csv.DictWriter(self._stats_csv_file, fieldnames=fieldnames)
+            self._stats_csv_writer.writeheader()
+
         logger.info(
             f"LiveDemo initialized: "
-            f"profiling={enable_profiling}, adaptive_fps={adaptive_fps}"
+            f"profiling={enable_profiling}, adaptive_fps={adaptive_fps}, stats_csv={bool(stats_csv)}"
         )
 
     def run(self):
@@ -221,6 +254,9 @@ class LiveDemo:
             self.hits.append(hit)
             self.total_score += hit.score
             logger.info(f"New hit: {hit.score} points (Total: {self.total_score})")
+
+        # Runtime stats (for HUD/export)
+        self._update_runtime_stats(hit, detection_frame)
 
         # Profile visualization
         if self.profiler:
@@ -350,7 +386,7 @@ class LiveDemo:
 
         # Semi-transparent background
         overlay = result.copy()
-        cv2.rectangle(overlay, (10, 10), (w - 10, 150), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (10, 10), (w - 10, 200), (0, 0, 0), -1)
         result = cv2.addWeighted(result, 0.7, overlay, 0.3, 0)
 
         # FPS
@@ -389,7 +425,36 @@ class LiveDemo:
             cv2.putText(result, cand_text, (20, 135),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
+        # Motion/adaptation info
+        motion_rate = self.latest_detector_stats.get("motion_rate_percent", 0.0)
+        var_thr = self.latest_detector_stats.get("var_threshold", 0.0)
+        min_area = self.latest_detector_stats.get("min_motion_area", 0)
+        motion_text = f"Motion: {motion_rate:>4.1f}%  varT:{var_thr:>4.1f}  minArea:{min_area:>3d}"
+        cv2.putText(result, motion_text, (20, 160),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+        # Stage timings
+        timing_text = self._format_stage_timing()
+        if timing_text:
+            cv2.putText(result, timing_text, (20, 185),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
         return result
+
+    def _format_stage_timing(self) -> str:
+        """Format stage timings for HUD overlay."""
+        if not self.latest_timing_report:
+            return ""
+
+        stage_order = ["preprocess", "motion", "contour", "scoring"]
+        parts = []
+        for stage in stage_order:
+            stats = self.latest_timing_report.get(stage)
+            if not stats:
+                continue
+            recent = stats.get("recent_avg_ms") or stats.get("avg_time_ms", 0.0)
+            parts.append(f"{stage[0].upper()}:{recent:.1f}ms")
+        return " | ".join(parts)
 
     def _update_fps(self):
         """Update FPS calculation."""
@@ -402,6 +467,42 @@ class LiveDemo:
             # Reset
             self.fps_frame_count = 0
             self.fps_start_time = time.time()
+
+    def _update_runtime_stats(self, hit: Optional[Hit], frame) -> None:
+        """Collect stats for HUD/export and stream them periodically."""
+        self.latest_detector_stats = self.hit_detector.get_stats()
+        self.latest_timing_report = self.hit_detector.get_performance_report()
+
+        if not self._stats_csv_writer or frame is None:
+            return
+
+        frame_id = getattr(frame, "frame_id", 0)
+        if (frame_id - self._last_export_frame) < self.stats_export_interval:
+            return
+
+        def stage_ms(name: str) -> float:
+            stats = self.latest_timing_report.get(name, {})
+            return float(stats.get("recent_avg_ms", stats.get("avg_time_ms", 0.0) or 0.0))
+
+        row = {
+            "frame_id": frame_id,
+            "timestamp": getattr(frame, "timestamp", time.time()),
+            "camera_fps": getattr(frame, "fps", 0.0),
+            "display_fps": self.current_fps,
+            "state": getattr(self.hit_detector.state_machine.state, "value", "unknown"),
+            "motion_rate_percent": self.latest_detector_stats.get("motion_rate_percent", 0.0),
+            "var_threshold": self.latest_detector_stats.get("var_threshold", 0.0),
+            "min_motion_area": self.latest_detector_stats.get("min_motion_area", 0),
+            "preprocess_ms": stage_ms("preprocess"),
+            "motion_ms": stage_ms("motion"),
+            "contour_ms": stage_ms("contour"),
+            "scoring_ms": stage_ms("scoring"),
+            "hits": len(self.hits),
+            "total_score": self.total_score,
+        }
+        self._stats_csv_writer.writerow(row)
+        self._stats_csv_file.flush()
+        self._last_export_frame = frame_id
 
     def _update_fps_mode(self):
         """Update adaptive FPS based on detection state."""
@@ -493,6 +594,13 @@ class LiveDemo:
         print(f"Hits detected: {len(self.hits)}")
         print(f"Total score: {self.total_score}")
 
+        # Stage timings
+        timing = self.hit_detector.get_performance_report()
+        if timing:
+            print("\nStage timings (recent ms):")
+            for name, stage_stats in sorted(timing.items()):
+                print(f"  {name}: {stage_stats.get('recent_avg_ms', 0.0):.2f} ms")
+
         print("=" * 80 + "\n")
 
     def _print_summary(self):
@@ -513,6 +621,14 @@ class LiveDemo:
                 print(f"  {i}. {mult_label}{sector_label} = {hit.score} points")
 
         print("=" * 60)
+        self._close_stats_export()
+
+    def _close_stats_export(self) -> None:
+        """Close CSV export cleanly."""
+        if self._stats_csv_file:
+            self._stats_csv_file.flush()
+            self._stats_csv_file.close()
+            self._stats_csv_file = None
 
 
 def parse_args():
@@ -574,6 +690,20 @@ def parse_args():
         help="Fixed target FPS (overrides adaptive)"
     )
 
+    parser.add_argument(
+        "--stats-csv",
+        type=str,
+        default=None,
+        help="Write per-frame detection stats to CSV (for Prometheus scraping)"
+    )
+
+    parser.add_argument(
+        "--stats-interval",
+        type=int,
+        default=60,
+        help="How many frames between CSV stat rows (default: 60)"
+    )
+
     return parser.parse_args()
 
 
@@ -630,6 +760,8 @@ def main():
             show_debug=args.debug,
             enable_profiling=args.profile,
             adaptive_fps=not args.no_adaptive_fps,
+            stats_csv=args.stats_csv,
+            stats_interval=args.stats_interval,
         )
 
         # Override FPS if specified

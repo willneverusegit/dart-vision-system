@@ -6,7 +6,9 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple
 from dataclasses import dataclass
+from collections import deque
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,19 @@ class MotionDetector:
         # Statistics
         self.frame_count = 0
         self.motion_detected_count = 0
+        self.fps_history = deque(maxlen=60)
+        self.current_fps = 0.0
+        self._last_timestamp: Optional[float] = None
+
+        # Adaptive thresholds
+        self.base_var_threshold = self.config.var_threshold
+        self.base_min_motion_area = self.config.min_motion_area
+        self.adaptive_var_threshold = self.config.var_threshold
+        self.adaptive_min_motion_area = self.config.min_motion_area
+        self._last_logged_thresholds: Tuple[float, int] = (
+            self.adaptive_var_threshold,
+            self.adaptive_min_motion_area
+        )
 
         logger.info(
             f"MotionDetector initialized: "
@@ -102,7 +117,12 @@ class MotionDetector:
             f"CLAHE={'ON' if self.config.enable_clahe else 'OFF'}"
         )
 
-    def detect(self, image: np.ndarray) -> Tuple[np.ndarray, bool]:
+    def detect(
+        self,
+        image: np.ndarray,
+        timestamp: Optional[float] = None,
+        frame_id: Optional[int] = None
+    ) -> Tuple[np.ndarray, bool]:
         """
         Detect motion in image.
 
@@ -115,6 +135,7 @@ class MotionDetector:
                 - has_motion: True if significant motion detected
         """
         self.frame_count += 1
+        self._update_fps(timestamp)
 
         # Convert to grayscale if needed
         if len(image.shape) == 3:
@@ -127,6 +148,8 @@ class MotionDetector:
             gray = self.clahe.apply(gray)
 
         # Apply background subtraction with learning rate
+        self._adapt_thresholds()
+        self.bg_subtractor.setVarThreshold(self.adaptive_var_threshold)
         fg_mask = self.bg_subtractor.apply(
             gray,
             learningRate=self.config.learning_rate  # ← NEW: Explicit learning rate
@@ -160,7 +183,7 @@ class MotionDetector:
 
         # Check if significant motion present
         motion_pixels = cv2.countNonZero(motion_mask)
-        has_motion = motion_pixels >= self.config.min_motion_area
+        has_motion = motion_pixels >= self.adaptive_min_motion_area
 
         if has_motion:
             self.motion_detected_count += 1
@@ -177,6 +200,11 @@ class MotionDetector:
         )
         self.frame_count = 0
         self.motion_detected_count = 0
+        self.fps_history.clear()
+        self.current_fps = 0.0
+        self._last_timestamp = None
+        self.adaptive_var_threshold = self.base_var_threshold
+        self.adaptive_min_motion_area = self.base_min_motion_area
         logger.info("Background model reset")
 
     @property
@@ -192,4 +220,63 @@ class MotionDetector:
             "frames_processed": self.frame_count,
             "motion_detected": self.motion_detected_count,
             "motion_rate_percent": self.motion_rate,
+            "fps_estimate": self.current_fps,
+            "var_threshold": self.adaptive_var_threshold,
+            "min_motion_area": self.adaptive_min_motion_area,
         }
+
+    def _update_fps(self, timestamp: Optional[float]) -> None:
+        """Estimate FPS from timestamps or wall-clock time."""
+        now = timestamp if timestamp is not None else time.time()
+        if self._last_timestamp is None:
+            self._last_timestamp = now
+            return
+
+        dt = max(now - self._last_timestamp, 1e-3)
+        fps = 1.0 / dt
+        self.fps_history.append(fps)
+        self.current_fps = sum(self.fps_history) / len(self.fps_history)
+        self._last_timestamp = now
+
+    def _adapt_thresholds(self) -> None:
+        """Adapt thresholds based on observed FPS and motion rate."""
+        # Boost sensitivity when FPS or motion rate drop, dampen when scene is busy
+        sensitivity = 1.0
+        if self.current_fps and self.current_fps < 20.0:
+            sensitivity += (20.0 - self.current_fps) * 0.03  # up to ~+0.6
+        if self.motion_rate < 10.0:
+            sensitivity += (10.0 - self.motion_rate) * 0.05  # up to ~+0.5
+        if self.motion_rate > 40.0:
+            sensitivity *= 0.8  # reduce sensitivity in very busy scenes
+
+        sensitivity = np.clip(sensitivity, 0.6, 2.0)
+
+        # Lower thresholds when sensitivity rises to catch subtle motion
+        self.adaptive_var_threshold = float(np.clip(
+            self.base_var_threshold / sensitivity,
+            6.0,
+            self.base_var_threshold * 1.5
+        ))
+        self.adaptive_min_motion_area = int(np.clip(
+            self.base_min_motion_area / sensitivity,
+            5,
+            max(self.base_min_motion_area * 2, self.base_min_motion_area)
+        ))
+
+        # Log when thresholds move significantly to aid tuning
+        last_var, last_area = self._last_logged_thresholds
+        if (
+            abs(self.adaptive_var_threshold - last_var) > 1.0 or
+            abs(self.adaptive_min_motion_area - last_area) >= 5
+        ):
+            logger.info(
+                "Adaptive motion: fps=%.1f, rate=%.1f%% → varThr=%.1f, minArea=%d",
+                self.current_fps,
+                self.motion_rate,
+                self.adaptive_var_threshold,
+                self.adaptive_min_motion_area
+            )
+            self._last_logged_thresholds = (
+                self.adaptive_var_threshold,
+                self.adaptive_min_motion_area
+            )
