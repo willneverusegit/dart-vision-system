@@ -384,9 +384,9 @@ class LiveDemo:
         result = image.copy()
         h, w = result.shape[:2]
 
-        # Semi-transparent background
+        # Semi-transparent background (extended for rejection reasons)
         overlay = result.copy()
-        cv2.rectangle(overlay, (10, 10), (w - 10, 200), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (10, 10), (w - 10, 280), (0, 0, 0), -1)
         result = cv2.addWeighted(result, 0.7, overlay, 0.3, 0)
 
         # FPS
@@ -438,6 +438,23 @@ class LiveDemo:
         if timing_text:
             cv2.putText(result, timing_text, (20, 185),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+        # Rejection reasons (NEW)
+        rejection_reasons = self.latest_detector_stats.get("rejection_reasons", {})
+        if rejection_reasons:
+            y_offset = 210
+            total_rejections = sum(rejection_reasons.values())
+            cv2.putText(result, f"Rejections: {total_rejections}", (20, y_offset),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 100), 1)
+
+            # Show top 3 rejection reasons
+            y_offset += 20
+            sorted_reasons = sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True)[:3]
+            for reason, count in sorted_reasons:
+                if count > 0:
+                    cv2.putText(result, f"  {reason}: {count}", (20, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 150, 150), 1)
+                    y_offset += 18
 
         return result
 

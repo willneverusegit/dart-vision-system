@@ -33,21 +33,21 @@ class DetectionState(Enum):
 class StateConfig:
     """Configuration for state machine."""
     # Watching state
-    watching_duration_sec: float = 1.0  # Max duration in watching state
-    large_blob_threshold_px: int = 500  # Hand/arm size threshold
+    watching_duration_sec: float = 0.8  # ← VERKÜRZT: War 1.0, schneller zu Confirming
+    large_blob_threshold_px: int = 800  # ← ERHÖHT: War 500, nur sehr große Blobs ignorieren
 
     # Confirming state
-    confirming_duration_sec: float = 1.0  # How long to search after motion stops
-    confirmation_frames: int = 3  # Frames needed to confirm
+    confirming_duration_sec: float = 1.5  # ← VERLÄNGERT: War 1.0, mehr Zeit zum Suchen
+    confirmation_frames: int = 2  # ← GELOCKERT: War 3, schnellere Bestätigung
     confirming_quiet_frames: int = 0  # Require N quiet frames before confirming
 
     # Cooldown state
-    cooldown_duration_sec: float = 1.0  # Cooldown after confirmed hit
-    cooldown_radius_px: float = 100.0  # Ignore hits within this radius
+    cooldown_duration_sec: float = 0.5  # ← VERKÜRZT: War 1.0, schneller wieder bereit
+    cooldown_radius_px: float = 80.0  # ← VERKLEINERT: War 100.0, kleinere Sperrzone
 
     # Flicker/spacing protection
-    min_frames_since_hit: int = 2  # Ignore new hits for this many frames
-    min_pixel_drift_px: float = 5.0  # Require drift to accept next hit
+    min_frames_since_hit: int = 1  # ← GELOCKERT: War 2, schnellere neue Treffer
+    min_pixel_drift_px: float = 3.0  # ← GELOCKERT: War 5.0, nähere Treffer erlaubt
 
 
 class DetectionStateMachine:

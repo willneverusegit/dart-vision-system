@@ -29,18 +29,18 @@ logger = logging.getLogger(__name__)
 class HitDetectionConfig:
     """Configuration for hit detection."""
     # Contour filtering
-    min_contour_area: int = 10
-    max_contour_area: int = 300
-    min_aspect_ratio: float = 0.3
-    max_aspect_ratio: float = 3.0
+    min_contour_area: int = 8  # ← GELOCKERT: War 10, jetzt kleinere Konturen erlaubt
+    max_contour_area: int = 400  # ← GELOCKERT: War 300, jetzt größere Konturen erlaubt
+    min_aspect_ratio: float = 0.2  # ← GELOCKERT: War 0.3
+    max_aspect_ratio: float = 4.0  # ← GELOCKERT: War 3.0
 
     # Shape filtering (research-based)
-    min_solidity: float = 0.3  # Area / Convex hull area
-    min_circularity: float = 0.1  # Filter very elongated shapes
+    min_solidity: float = 0.2  # ← GELOCKERT: War 0.3, jetzt lockerer
+    min_circularity: float = 0.05  # ← GELOCKERT: War 0.1, jetzt sehr locker
 
     # Temporal confirmation
-    confirmation_frames: int = 3
-    position_tolerance_px: float = 10.0
+    confirmation_frames: int = 2  # ← GELOCKERT: War 3, jetzt schnellere Bestätigung
+    position_tolerance_px: float = 15.0  # ← GELOCKERT: War 10.0, jetzt größere Position-Toleranz
     confirmation_timeout_sec: float = 3.0
 
     # Sub-pixel refinement
@@ -54,14 +54,14 @@ class HitDetectionConfig:
     background_history_frames: int = 3  # Quiet frames used for median background
 
     # Candidate motion analysis
-    max_settling_speed_px_per_sec: float = 1.0
+    max_settling_speed_px_per_sec: float = 15.0  # ← GELOCKERT: War 1.0, jetzt viel großzügiger
     velocity_settling_frames: int = 3
-    reverse_motion_dot_threshold: float = -0.3
+    reverse_motion_dot_threshold: float = -0.5  # ← GELOCKERT: War -0.3, jetzt toleranter
 
     # Spacing and plausibility
-    min_frames_since_hit: int = 2
-    min_pixel_drift_since_hit: float = 8.0
-    entry_angle_tolerance_deg: float = 70.0
+    min_frames_since_hit: int = 1  # ← GELOCKERT: War 2, jetzt schneller
+    min_pixel_drift_since_hit: float = 5.0  # ← GELOCKERT: War 8.0, jetzt näher erlaubt
+    entry_angle_tolerance_deg: float = 120.0  # ← GELOCKERT: War 70.0, jetzt fast alle Winkel OK
 
     # Performance and logging
     timing_log_interval_frames: int = 120
@@ -143,6 +143,17 @@ class EnhancedHitDetector:
         self.motion_frames = 0
         self.candidates_created = 0
         self.hits_confirmed = 0
+
+        # Debug: Rejection reasons tracking
+        self.rejection_reasons = {
+            'settling_speed': 0,
+            'entry_angle': 0,
+            'reverse_motion': 0,
+            'cooldown_zone': 0,
+            'last_hit_constraints': 0,
+            'final_check': 0,
+            'no_contours': 0
+        }
 
         # Performance monitoring
         self.performance_monitor = PerformanceMonitor() if self.config.enable_stage_timing else None
@@ -270,7 +281,11 @@ class EnhancedHitDetector:
         contours = self._find_dart_contours(new_objects_mask)
 
         if not contours:
+            self.rejection_reasons['no_contours'] += 1
+            logger.debug("No valid dart contours found in CONFIRMING state")
             return None
+
+        logger.debug(f"Found {len(contours)} valid dart contour(s) in CONFIRMING state")
 
         # Process each contour
         for contour in contours:
@@ -287,11 +302,13 @@ class EnhancedHitDetector:
 
             # Check if in cooldown zone
             if self.state_machine.is_in_cooldown_zone(cx_full, cy_full):
+                self.rejection_reasons['cooldown_zone'] += 1
                 logger.debug(f"Position ({cx_full:.0f}, {cy_full:.0f}) in cooldown zone")
                 continue
 
             # Additional gating vs last confirmed hit
             if not self._passes_last_hit_constraints(cx_full, cy_full, frame.frame_id):
+                self.rejection_reasons['last_hit_constraints'] += 1
                 continue
 
             # Track or create candidate
@@ -350,7 +367,16 @@ class EnhancedHitDetector:
         )
 
         recent = candidate.velocity_history[-sample_len:]
-        return max(recent) <= self.config.max_settling_speed_px_per_sec
+        max_speed = max(recent)
+        passed = max_speed <= self.config.max_settling_speed_px_per_sec
+
+        if not passed:
+            self.rejection_reasons['settling_speed'] += 1
+            logger.debug(
+                f"Candidate REJECTED by settling speed: max={max_speed:.2f} px/s > threshold={self.config.max_settling_speed_px_per_sec:.2f} px/s"
+            )
+
+        return passed
 
     def _passes_entry_angle(self, candidate: HitCandidate) -> bool:
         """
@@ -383,7 +409,15 @@ class EnhancedHitDetector:
 
         cos_sim = np.clip(cos_sim, -1.0, 1.0)
         angle = np.degrees(np.arccos(cos_sim))
-        return angle <= self.config.entry_angle_tolerance_deg
+        passed = angle <= self.config.entry_angle_tolerance_deg
+
+        if not passed:
+            self.rejection_reasons['entry_angle'] += 1
+            logger.debug(
+                f"Candidate REJECTED by entry angle: angle={angle:.1f}° > tolerance={self.config.entry_angle_tolerance_deg:.1f}°"
+            )
+
+        return passed
 
     def _can_accept_hit(self, hit: Hit, frame_id: int) -> bool:
         """
@@ -394,7 +428,9 @@ class EnhancedHitDetector:
                 self.last_confirmed_frame_id is not None and
                 (frame_id - self.last_confirmed_frame_id) < self.config.min_frames_since_hit
             ):
-                logger.debug("Hit rejected: too few frames since last hit")
+                logger.debug(
+                    f"Hit REJECTED by final check: frame_gap={frame_id - self.last_confirmed_frame_id} < min={self.config.min_frames_since_hit}"
+                )
                 return False
 
             drift = (
@@ -402,7 +438,9 @@ class EnhancedHitDetector:
                 (hit.y_px - self.last_confirmed_hit.y_px) ** 2
             ) ** 0.5
             if drift < self.config.min_pixel_drift_since_hit:
-                logger.debug("Hit rejected: insufficient pixel drift since last hit")
+                logger.debug(
+                    f"Hit REJECTED by final check: drift={drift:.1f}px < min={self.config.min_pixel_drift_since_hit:.1f}px"
+                )
                 return False
 
         return True
@@ -446,7 +484,9 @@ class EnhancedHitDetector:
             candidate_ring == last_ring and
             abs(candidate_radius - last_radius) < self.config.min_pixel_drift_since_hit
         ):
-            logger.debug("Candidate discarded: same ring without sufficient radial change")
+            logger.debug(
+                f"Candidate REJECTED: same ring '{candidate_ring}' without radial change (Δr={abs(candidate_radius - last_radius):.1f}px)"
+            )
             return False
 
         # Entry angle plausibility relative to radial direction
@@ -457,7 +497,9 @@ class EnhancedHitDetector:
         )
         angle_diff = abs((angle - last_angle + 180) % 360 - 180)
         if angle_diff > self.config.entry_angle_tolerance_deg * 2:
-            logger.debug("Candidate discarded: angle too far from prior entry corridor")
+            logger.debug(
+                f"Candidate REJECTED: angle_diff={angle_diff:.1f}° > tolerance={self.config.entry_angle_tolerance_deg * 2:.1f}°"
+            )
             return False
 
         return True
@@ -481,8 +523,8 @@ class EnhancedHitDetector:
         # Absolute difference
         diff = cv2.absdiff(current_gray, background_gray)
 
-        # Threshold
-        _, diff_mask = cv2.threshold(diff, 15, 255, cv2.THRESH_BINARY)
+        # Threshold (GELOCKERT: war 15, jetzt 20 für weniger falsche Positive)
+        _, diff_mask = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
 
         # Morphology to clean up
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -710,7 +752,10 @@ class EnhancedHitDetector:
             speed = (motion_vector[0] ** 2 + motion_vector[1] ** 2) ** 0.5 / dt
 
             if self._is_reverse_motion(matched_candidate.last_motion_vector, motion_vector):
-                logger.debug("Candidate rejected due to reverse motion")
+                self.rejection_reasons['reverse_motion'] += 1
+                logger.debug(
+                    f"Candidate REJECTED: reverse motion detected at ({x:.1f}, {y:.1f})"
+                )
                 self.candidates.remove(matched_candidate)
                 return None
 
@@ -725,9 +770,11 @@ class EnhancedHitDetector:
             matched_candidate.last_seen_time = timestamp
 
             if not self._has_settled_speed(matched_candidate):
+                logger.debug(f"Candidate at ({x:.1f}, {y:.1f}) waiting to settle (count={matched_candidate.confirmation_count})")
                 return None
 
             if not self._passes_entry_angle(matched_candidate):
+                logger.debug(f"Candidate at ({x:.1f}, {y:.1f}) failed entry angle (count={matched_candidate.confirmation_count})")
                 return None
 
             if matched_candidate.confirmation_count >= self.config.confirmation_frames:
@@ -737,6 +784,7 @@ class EnhancedHitDetector:
 
                 if not self._can_accept_hit(hit, frame_id):
                     # Remove noisy candidate
+                    self.rejection_reasons['final_check'] += 1
                     self.candidates.remove(matched_candidate)
                     return None
 
@@ -795,6 +843,9 @@ class EnhancedHitDetector:
         self.confirmed_hits.clear()
         self._background_cache = None
         self._background_dirty = True
+        # Reset rejection reasons
+        for key in self.rejection_reasons:
+            self.rejection_reasons[key] = 0
         if self.performance_monitor:
             self.performance_monitor.reset()
         logger.info("Detector reset")
@@ -821,6 +872,7 @@ class EnhancedHitDetector:
             "quiet_frame_buffer": len(self.quiet_frame_buffer),
             "consecutive_no_motion_frames": self.consecutive_no_motion_frames,
             "timing_ms": timing_report,
+            "rejection_reasons": self.rejection_reasons.copy(),
         }
 
     def _update_quiet_background(self, gray_frame: np.ndarray) -> None:

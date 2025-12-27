@@ -24,14 +24,14 @@ class MotionConfig:
     - CLAHE: clipLimit=2.0-3.0, tiles=(8,8)
     """
     # MOG2 parameters (research-optimized)
-    history: int = 150  # ← CHANGED: Was 500, now 100-150
-    var_threshold: float = 24.0  # ← CHANGED: Was 16.0, now 16-24 range
+    history: int = 120  # ← OPTIMIERT: Kürzere History für schnellere Anpassung
+    var_threshold: float = 20.0  # ← GELOCKERT: War 24.0, jetzt sensitiver
     detect_shadows: bool = False
-    learning_rate: float = 0.005  # ← NEW: 0.001-0.01 range
+    learning_rate: float = 0.008  # ← ERHÖHT: War 0.005, schnellere Anpassung
 
     # Motion thresholds
-    min_motion_area: int = 80
-    motion_threshold: int = 140
+    min_motion_area: int = 50  # ← GELOCKERT: War 80, kleinere Bewegungen erkennen
+    motion_threshold: int = 120  # ← GELOCKERT: War 140, empfindlicher
 
     # Morphological operations (research-optimized)
     enable_morphology: bool = True
