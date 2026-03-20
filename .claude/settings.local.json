@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "command": "echo 'Writing file: $TOOL_INPUT_FILE_PATH'"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "command": "bash -c 'if [[ \"$TOOL_INPUT_FILE_PATH\" == backend/*.py ]]; then cd \"C:/Users/domes/OneDrive/Desktop/FREE_code\" && ruff check \"$TOOL_INPUT_FILE_PATH\" 2>/dev/null || echo \"ruff: issues found\"; fi'"
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(ruff *)",
+      "Bash(pytest *)",
+      "Bash(python -m pytest *)",
+      "Bash(uvicorn *)"
+    ]
+  }
+}
