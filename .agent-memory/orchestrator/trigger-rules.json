@@ -1,0 +1,10 @@
+{
+  "auto_review_code": false,
+  "auto_run_tests": true,
+  "auto_log_iterations": true,
+  "phase_switch_auto_bootstrap": true,
+  "session_end_auto_summary": true,
+  "test_command": "python -m pytest backend/tests/ --tb=short -q",
+  "lint_command": "python -m ruff check backend/",
+  "phase_branch_pattern": "feature/phase*"
+}

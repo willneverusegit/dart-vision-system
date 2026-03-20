@@ -25,7 +25,8 @@
       "Bash(python -m pytest backend/tests/test_models.py -v)",
       "Bash(python -m pytest backend/tests/ -v)",
       "Bash(python -m pytest backend/tests/ -v --tb=short)",
-      "Bash(gh pr:*)"
+      "Bash(gh pr:*)",
+      "Bash(python -m ruff check backend/ --fix)"
     ]
   }
 }
