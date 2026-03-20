@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dart Vision</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="header">
+    <h1 class="logo">Dart Vision</h1>
+    <nav class="nav">
+      <a href="#setup" class="nav-link" data-page="setup">Setup</a>
+      <a href="#calibration" class="nav-link" data-page="calibration">Calibration</a>
+      <a href="#game" class="nav-link" data-page="game">Game</a>
+    </nav>
+  </header>
+
+  <main id="app">
+    <!-- Setup Page -->
+    <section id="page-setup" class="page">
+      <h2>Setup</h2>
+      <p>Kamera-Auswahl und Profilverwaltung (coming soon)</p>
+    </section>
+
+    <!-- Calibration Page -->
+    <section id="page-calibration" class="page">
+      <h2>Kalibrierung</h2>
+      <p>Kalibrierungs-Assistent (coming soon)</p>
+    </section>
+
+    <!-- Game Page -->
+    <section id="page-game" class="page">
+      <div class="game-layout">
+        <div class="board-container">
+          <canvas id="dartboard" width="500" height="500"></canvas>
+        </div>
+        <div class="score-panel">
+          <div id="game-controls">
+            <button id="btn-start-game" class="btn btn-primary">Neues Spiel</button>
+            <button id="btn-stop-game" class="btn btn-danger" disabled>Spiel beenden</button>
+          </div>
+          <div id="current-score" class="score-display">
+            <h3>Score</h3>
+            <div id="score-value" class="score-big">0</div>
+          </div>
+          <div id="last-throw" class="last-throw"></div>
+          <div id="throw-history">
+            <h3>Wurf-Historie</h3>
+            <ul id="history-list"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

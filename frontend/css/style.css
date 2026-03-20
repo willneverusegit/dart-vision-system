@@ -1,0 +1,199 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #1a1a2e;
+  --bg-card: #16213e;
+  --bg-hover: #0f3460;
+  --text: #e0e0e0;
+  --text-muted: #888;
+  --accent: #e94560;
+  --accent-green: #4ecca3;
+  --accent-yellow: #f5c518;
+  --border: #2a2a4a;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.logo {
+  font-size: 1.5rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.nav-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  transition: all 0.2s;
+  font-size: 1rem;
+}
+
+.nav-link:hover,
+.nav-link.active {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* Pages */
+.page {
+  display: none;
+  padding: 2rem;
+}
+
+.page.active {
+  display: block;
+}
+
+/* Game Layout */
+.game-layout {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.board-container {
+  flex: 0 0 auto;
+}
+
+#dartboard {
+  border-radius: 50%;
+  cursor: crosshair;
+  background: var(--bg-card);
+}
+
+.score-panel {
+  flex: 1;
+  min-width: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent-green);
+  color: #111;
+}
+
+.btn-danger {
+  background: var(--accent);
+  color: #fff;
+}
+
+#game-controls {
+  display: flex;
+  gap: 1rem;
+}
+
+/* Score Display */
+.score-display {
+  background: var(--bg-card);
+  padding: 1.5rem;
+  border-radius: 12px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+
+.score-big {
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--accent-green);
+  margin-top: 0.5rem;
+}
+
+/* Last Throw */
+.last-throw {
+  font-size: 1.5rem;
+  text-align: center;
+  min-height: 2rem;
+  color: var(--accent-yellow);
+  font-weight: 600;
+}
+
+/* History */
+#throw-history {
+  background: var(--bg-card);
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+#history-list {
+  list-style: none;
+  margin-top: 0.75rem;
+}
+
+#history-list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+}
+
+#history-list li .field {
+  color: var(--text-muted);
+}
+
+#history-list li .points {
+  font-weight: 600;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .game-layout {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  #dartboard {
+    width: 350px;
+    height: 350px;
+  }
+
+  .score-panel {
+    width: 100%;
+  }
+}
