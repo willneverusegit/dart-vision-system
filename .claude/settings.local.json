@@ -18,7 +18,14 @@
       "Bash(ruff *)",
       "Bash(pytest *)",
       "Bash(python -m pytest *)",
-      "Bash(uvicorn *)"
+      "Bash(uvicorn *)",
+      "Bash(pip install:*)",
+      "Bash(ruff check:*)",
+      "Bash(python -m ruff check backend/)",
+      "Bash(python -m pytest backend/tests/test_models.py -v)",
+      "Bash(python -m pytest backend/tests/ -v)",
+      "Bash(python -m pytest backend/tests/ -v --tb=short)",
+      "Bash(gh pr:*)"
     ]
   }
 }
