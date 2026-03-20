@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backend.api.calibration import router as calibration_router
+from backend.api.cameras import router as cameras_router
 from backend.api.game import router as game_router
 from backend.api.websocket import router as ws_router
 
@@ -16,6 +18,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(calibration_router)
+app.include_router(cameras_router)
 app.include_router(game_router)
 app.include_router(ws_router)
 
