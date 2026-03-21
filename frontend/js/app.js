@@ -1,5 +1,6 @@
 import { initCalibrationPage } from './calibration-ui.js';
 import { initGamePage } from './game-ui.js';
+import { initMulticamPage } from './multicam-ui.js';
 import { initSetupPage } from './setup-ui.js';
 
 const AppState = {
@@ -29,4 +30,5 @@ window.addEventListener('DOMContentLoaded', () => {
   initSetupPage();
   initCalibrationPage();
   initGamePage();
+  initMulticamPage();
 });

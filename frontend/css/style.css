@@ -242,6 +242,118 @@ body {
   color: #e94560;
 }
 
+/* Multi-Cam Layout */
+.multicam-layout {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.cam-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  flex: 2;
+}
+
+.multicam-panel {
+  flex: 1;
+  min-width: 250px;
+}
+
+.multicam-controls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.cam-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.cam-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.cam-name {
+  font-weight: 600;
+}
+
+.cam-status {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+}
+
+.cam-status.online {
+  color: var(--accent-green);
+  background: rgba(78, 204, 163, 0.15);
+}
+
+.cam-status.offline {
+  color: var(--accent);
+  background: rgba(233, 69, 96, 0.15);
+}
+
+.cam-preview {
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: #111;
+}
+
+.cam-info {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.diagnostics-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.diag-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.stereo-wizard {
+  background: var(--bg-card);
+  border: 2px solid var(--accent-yellow);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.wizard-progress {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--accent-yellow);
+}
+
+.error-msg {
+  color: var(--accent);
+}
+
 /* Confidence indicator */
 .confidence-indicator {
   font-size: 1.2rem;
