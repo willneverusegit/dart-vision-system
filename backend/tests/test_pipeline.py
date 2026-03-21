@@ -2,7 +2,12 @@
 
 import numpy as np
 
-from backend.vision.pipeline import PipelineResult, extract_tip, process_frame
+from backend.vision.pipeline import (
+    PipelineMode,
+    PipelineResult,
+    extract_tip,
+    process_frame,
+)
 
 
 class TestExtractTip:
@@ -58,3 +63,54 @@ class TestPipelineResult:
         assert r.field == ""
         assert r.score == 0
         assert r.multiplier == 1
+
+
+class TestEcoMode:
+    def test_eco_skips_canny(self) -> None:
+        """Eco mode should still produce a valid result without Canny."""
+        bg = np.full((480, 640), 128, dtype=np.uint8)
+        frame = np.full((480, 640, 3), 128, dtype=np.uint8)
+        result = process_frame(frame, bg, mode=PipelineMode.ECO)
+        assert isinstance(result, PipelineResult)
+        assert result.debug_output is None
+
+    def test_eco_detects_bright_object(self) -> None:
+        """Eco mode can still detect a large bright object."""
+        bg = np.zeros((480, 640), dtype=np.uint8)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame[150:300, 315:325] = 200
+        result = process_frame(frame, bg, mode=PipelineMode.ECO)
+        assert isinstance(result, PipelineResult)
+
+
+class TestDebugMode:
+    def test_debug_produces_thumbnails(self) -> None:
+        """Debug mode should produce debug output with thumbnails."""
+        bg = np.zeros((480, 640), dtype=np.uint8)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame[150:300, 315:325] = 200
+        result = process_frame(frame, bg, mode=PipelineMode.DEBUG)
+        assert result.debug_output is not None
+        assert result.debug_output.grayscale_b64 is not None
+        assert result.debug_output.diff_b64 is not None
+        assert result.debug_output.canny_b64 is not None
+        assert result.debug_output.contours_b64 is not None
+
+    def test_normal_mode_no_debug(self) -> None:
+        """Normal mode should not produce debug output."""
+        bg = np.full((480, 640), 128, dtype=np.uint8)
+        frame = np.full((480, 640, 3), 128, dtype=np.uint8)
+        result = process_frame(frame, bg, mode=PipelineMode.NORMAL)
+        assert result.debug_output is None
+
+    def test_debug_thumbnails_are_base64(self) -> None:
+        """Debug thumbnails should be valid base64 strings."""
+        import base64
+
+        bg = np.zeros((480, 640), dtype=np.uint8)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame[100:400, 300:310] = 255
+        result = process_frame(frame, bg, mode=PipelineMode.DEBUG)
+        assert result.debug_output is not None
+        # Should not raise
+        base64.b64decode(result.debug_output.grayscale_b64)

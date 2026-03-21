@@ -1,9 +1,11 @@
 """Contour pipeline, dart tip extraction, and detection loop."""
 
+import base64
 import logging
 import threading
 import time
 from collections.abc import Callable
+from enum import StrEnum
 
 import cv2
 import numpy as np
@@ -18,6 +20,23 @@ from backend.vision.detection import BackgroundModel, detect_motion, wait_for_st
 logger = logging.getLogger(__name__)
 
 
+class PipelineMode(StrEnum):
+    """Pipeline processing mode."""
+
+    NORMAL = "normal"
+    ECO = "eco"
+    DEBUG = "debug"
+
+
+class DebugOutput(BaseModel):
+    """Debug thumbnails from each pipeline stage."""
+
+    grayscale_b64: str | None = None
+    diff_b64: str | None = None
+    canny_b64: str | None = None
+    contours_b64: str | None = None
+
+
 class PipelineResult(BaseModel):
     """Result of processing a single frame through the detection pipeline."""
 
@@ -27,12 +46,14 @@ class PipelineResult(BaseModel):
     multiplier: int = 1
     contour_count: int = 0
     debug_frame_b64: str | None = Field(default=None, exclude=True)
+    debug_output: DebugOutput | None = None
 
 
 def process_frame(
     frame: np.ndarray,
     background: np.ndarray,
     board: BoardModel | None = None,
+    mode: PipelineMode = PipelineMode.NORMAL,
 ) -> PipelineResult:
     """Full detection pipeline: diff -> Canny -> contour filter -> tip extraction.
 
@@ -40,6 +61,7 @@ def process_frame(
         frame: Current BGR frame with dart.
         background: Grayscale background (empty board).
         board: BoardModel for coordinate mapping (optional).
+        mode: Pipeline mode (normal, eco, debug).
 
     Returns:
         PipelineResult with detected tip and score.
@@ -53,10 +75,14 @@ def process_frame(
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
 
-    # Canny edge detection on the diff
-    edges = cv2.Canny(thresh, 50, 150)
-
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if mode == PipelineMode.ECO:
+        # Eco mode: skip Canny, use thresholded diff directly for contours
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        edges = None
+    else:
+        # Normal/Debug: full Canny pipeline
+        edges = cv2.Canny(thresh, 50, 150)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # Filter contours: dart-shaped (elongated, reasonable area)
     dart_contours = _filter_dart_contours(contours)
@@ -79,7 +105,42 @@ def process_frame(
         result.score = base_score * multiplier
         result.multiplier = multiplier
 
+    # Debug output: generate thumbnails of each stage
+    if mode == PipelineMode.DEBUG:
+        result.debug_output = _build_debug_output(gray, diff, edges, dart_contours, frame.shape[:2])
+
     return result
+
+
+def _encode_thumbnail(img: np.ndarray, size: int = 160) -> str:
+    """Encode an image as base64 JPEG thumbnail."""
+    h, w = img.shape[:2]
+    scale = size / max(h, w)
+    thumb = cv2.resize(img, (int(w * scale), int(h * scale)))
+    if len(thumb.shape) == 2:
+        thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
+    _, buf = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 60])
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
+def _build_debug_output(
+    gray: np.ndarray,
+    diff: np.ndarray,
+    edges: np.ndarray | None,
+    contours: list[np.ndarray],
+    frame_shape: tuple[int, int],
+) -> DebugOutput:
+    """Build debug thumbnails from pipeline stages."""
+    # Contour visualization
+    contour_img = np.zeros((*frame_shape, 3), dtype=np.uint8)
+    cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 2)
+
+    return DebugOutput(
+        grayscale_b64=_encode_thumbnail(gray),
+        diff_b64=_encode_thumbnail(diff),
+        canny_b64=_encode_thumbnail(edges) if edges is not None else None,
+        contours_b64=_encode_thumbnail(contour_img),
+    )
 
 
 def _filter_dart_contours(
@@ -172,6 +233,7 @@ class DetectionLoop:
         on_hit: Callable[[HitEvent, bytes | None], None] | None = None,
         debug: bool = False,
         poll_interval: float = 0.05,
+        mode: PipelineMode = PipelineMode.NORMAL,
     ) -> None:
         self._camera_id = camera_id
         self._background_model = background_model
@@ -179,8 +241,10 @@ class DetectionLoop:
         self._on_hit = on_hit
         self._debug = debug
         self._poll_interval = poll_interval
+        self._mode = mode
         self._running = False
         self._thread: threading.Thread | None = None
+        self._frame_counter = 0
 
     @property
     def is_running(self) -> bool:
@@ -217,6 +281,12 @@ class DetectionLoop:
                 time.sleep(self._poll_interval)
                 continue
 
+            # Eco mode: skip 2 of every 3 frames
+            self._frame_counter += 1
+            if self._mode == PipelineMode.ECO and self._frame_counter % 3 != 0:
+                time.sleep(self._poll_interval)
+                continue
+
             if not detect_motion(frame, bg):
                 time.sleep(self._poll_interval)
                 continue
@@ -226,7 +296,8 @@ class DetectionLoop:
             if stable is None:
                 continue
 
-            result = process_frame(stable, bg, self._board_model)
+            effective_mode = PipelineMode.DEBUG if self._debug else self._mode
+            result = process_frame(stable, bg, self._board_model, mode=effective_mode)
             if result.tip_point is None:
                 continue
 
