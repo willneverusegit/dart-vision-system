@@ -31,18 +31,24 @@ tasks/          # Aufgaben-Breakdown nach Phasen
 ### Python
 - Linting: `ruff check backend/`
 - Formatting: `ruff format backend/`
+- ruff config: N806 ignoriert (Mathe-Konvention für H, R, T Matrizen) — siehe `backend/pyproject.toml`
+- Quick fix: `ruff check backend/ --fix` (safe fixes only)
 - Type Hints: überall, Pydantic BaseModel für Datenstrukturen
 - Docstrings: Google Style
-- Tests: `pytest backend/tests/`
+- Tests: `python -m pytest backend/tests/ --tb=short -q`
+- Use FastAPI `TestClient` (sync), nicht `httpx.AsyncClient` — vermeidet async fixture Probleme
 
 ### JavaScript
 - Vanilla JS, ES Modules
 - Kein Build-Tool im MVP
 - ESLint wenn vorhanden
+- Kein innerHTML — verwende `createElement`/`replaceChildren` (XSS-Prävention)
 
 ### Git
 - Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
 - Ein Feature pro Branch
+- Branch-Schema: `feature/phase{N}-{name}` (z.B. `feature/phase2-calibration`)
+- PRs gegen `master` (nicht `main`)
 
 ## Skill-Routing
 
@@ -85,3 +91,9 @@ Siehe `tasks/TASK-INDEX.md` für die priorisierte Aufgabenliste (10 Phasen, 34 S
 - `POST /api/game/start` — Spiel starten
 - `POST /api/game/stop` — Spiel beenden
 - `WebSocket /ws/stream` — Preview-Frames + Events
+
+## Session-Hooks
+
+- `SessionStart` → `.claude/hooks/session-bootstrap.sh` (Branch, Phase, Tasks, Tests)
+- `PostToolUse:Bash` → `.claude/hooks/phase-switch.sh` (bei `git checkout`/`switch`)
+- `.agent-memory/` enthält Session-Kontext für agentic-os Integration
