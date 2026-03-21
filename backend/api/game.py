@@ -28,9 +28,7 @@ async def start_game(config: GameConfig) -> GameState:
         raise HTTPException(status_code=409, detail="Game already active")
 
     starting = config.starting_points if config.mode != GameMode.FREE else 0
-    players = [
-        PlayerState(name=name, remaining_points=starting) for name in config.player_names
-    ]
+    players = [PlayerState(name=name, remaining_points=starting) for name in config.player_names]
     _current_game = GameState(
         mode=config.mode,
         players=players,

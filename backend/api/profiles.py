@@ -19,10 +19,7 @@ router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 def get_profiles() -> list[dict]:
     """List all saved profiles with their IDs and active status."""
     active_id = get_active_profile_id()
-    return [
-        {"id": pid, "active": pid == active_id}
-        for pid in list_profiles()
-    ]
+    return [{"id": pid, "active": pid == active_id} for pid in list_profiles()]
 
 
 @router.get("/{profile_id}")

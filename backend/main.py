@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api.calibration import router as calibration_router
 from backend.api.cameras import router as cameras_router
+from backend.api.detection import router as detection_router
 from backend.api.game import router as game_router
 from backend.api.profiles import router as profiles_router
 from backend.api.warp import router as warp_router
@@ -42,6 +43,7 @@ app.add_middleware(
 
 app.include_router(calibration_router)
 app.include_router(cameras_router)
+app.include_router(detection_router)
 app.include_router(game_router)
 app.include_router(profiles_router)
 app.include_router(warp_router)
