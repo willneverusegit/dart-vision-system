@@ -1,5 +1,6 @@
 import { initCalibrationPage } from './calibration-ui.js';
 import { initGamePage } from './game-ui.js';
+import { initSetupPage } from './setup-ui.js';
 
 const AppState = {
   currentPage: 'game',
@@ -25,6 +26,7 @@ function handleHash() {
 window.addEventListener('hashchange', handleHash);
 window.addEventListener('DOMContentLoaded', () => {
   handleHash();
+  initSetupPage();
   initCalibrationPage();
   initGamePage();
 });
