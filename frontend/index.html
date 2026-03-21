@@ -13,6 +13,7 @@
       <a href="#setup" class="nav-link" data-page="setup">Setup</a>
       <a href="#calibration" class="nav-link" data-page="calibration">Calibration</a>
       <a href="#game" class="nav-link" data-page="game">Game</a>
+      <a href="#multicam" class="nav-link" data-page="multicam">Multi-Cam</a>
     </nav>
   </header>
 
@@ -39,6 +40,24 @@
     <section id="page-calibration" class="page">
       <h2>Kalibrierung</h2>
       <p>Kalibrierungs-Assistent (coming soon)</p>
+    </section>
+
+    <!-- Multi-Cam Page -->
+    <section id="page-multicam" class="page">
+      <h2>Multi-Cam Setup</h2>
+      <div class="multicam-layout">
+        <div class="cam-grid" id="cam-grid"></div>
+        <div class="multicam-panel">
+          <div class="multicam-controls">
+            <button id="btn-scan-cameras" class="btn btn-primary">Kameras suchen</button>
+            <button id="btn-start-stereo" class="btn" disabled>Stereo-Kalibrierung</button>
+          </div>
+          <div id="multicam-diagnostics" class="diagnostics-panel">
+            <h3>Diagnostik</h3>
+            <div id="diag-content"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Game Page -->
