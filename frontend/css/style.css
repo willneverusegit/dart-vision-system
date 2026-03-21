@@ -242,6 +242,58 @@ body {
   color: #e94560;
 }
 
+/* Confidence indicator */
+.confidence-indicator {
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-align: center;
+  min-height: 1.5rem;
+}
+
+/* Review dialog overlay */
+.review-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.review-dialog-box {
+  background: var(--bg-card);
+  border: 2px solid var(--accent);
+  border-radius: 16px;
+  padding: 2rem;
+  max-width: 400px;
+  text-align: center;
+}
+
+.review-dialog-box h3 {
+  margin-bottom: 0.75rem;
+  color: var(--accent-yellow);
+}
+
+.review-dialog-box p {
+  margin-bottom: 1.5rem;
+  color: var(--text-muted);
+}
+
+.review-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.review-btn {
+  min-width: 70px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .game-layout {
