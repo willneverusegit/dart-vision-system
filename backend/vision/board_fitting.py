@@ -89,19 +89,25 @@ def compute_homography_from_circle(
     cx, cy, r = center[0], center[1], radius
 
     # Map the bounding box of the circle to the output square
-    src = np.array([
-        [cx - r, cy - r],
-        [cx + r, cy - r],
-        [cx + r, cy + r],
-        [cx - r, cy + r],
-    ], dtype=np.float64)
+    src = np.array(
+        [
+            [cx - r, cy - r],
+            [cx + r, cy - r],
+            [cx + r, cy + r],
+            [cx - r, cy + r],
+        ],
+        dtype=np.float64,
+    )
 
-    dst = np.array([
-        [0, 0],
-        [output_size, 0],
-        [output_size, output_size],
-        [0, output_size],
-    ], dtype=np.float64)
+    dst = np.array(
+        [
+            [0, 0],
+            [output_size, 0],
+            [output_size, output_size],
+            [0, output_size],
+        ],
+        dtype=np.float64,
+    )
 
     H, _ = cv2.findHomography(src, dst)
     return H
