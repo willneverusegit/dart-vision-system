@@ -2,6 +2,7 @@ import { drawBoard, drawHit, drawHits, getScoreFromClick } from './board-canvas.
 
 let totalScore = 0;
 const throws = [];
+const CONFIDENCE_REVIEW_THRESHOLD = 0.6;
 
 export function initGamePage() {
   const canvas = document.getElementById('dartboard');
@@ -86,8 +87,79 @@ function updateHistory() {
     pointsSpan.className = 'points';
     pointsSpan.textContent = `+${t.score}`;
 
+    if (t.confidence !== undefined) {
+      const confSpan = document.createElement('span');
+      confSpan.className = getConfidenceClass(t.confidence);
+      confSpan.textContent = ` ${Math.round(t.confidence * 100)}%`;
+      pointsSpan.appendChild(confSpan);
+    }
+
     li.appendChild(fieldSpan);
     li.appendChild(pointsSpan);
     list.appendChild(li);
   }
+}
+
+function getConfidenceClass(confidence) {
+  if (confidence >= 0.8) return 'hit-green';
+  if (confidence >= 0.6) return 'hit-yellow';
+  return 'hit-red';
+}
+
+export function showConfidence(confidence) {
+  const el = document.getElementById('confidence-indicator');
+  if (!el) return;
+  const pct = Math.round(confidence * 100);
+  el.textContent = `${pct}%`;
+  el.className = `confidence-indicator ${getConfidenceClass(confidence)}`;
+}
+
+export function showReviewDialog(field, alternatives, onSelect) {
+  // Remove existing dialog if any
+  const existing = document.getElementById('review-dialog');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'review-dialog';
+  overlay.className = 'review-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'review-dialog-box';
+
+  const title = document.createElement('h3');
+  title.textContent = 'Treffer bestaetigen?';
+  dialog.appendChild(title);
+
+  const desc = document.createElement('p');
+  desc.textContent = `Erkannt: ${field} — Niedrige Confidence`;
+  dialog.appendChild(desc);
+
+  const btnContainer = document.createElement('div');
+  btnContainer.className = 'review-buttons';
+
+  const allOptions = [field, ...alternatives.filter(a => a !== field)];
+  for (const option of allOptions) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary review-btn';
+    btn.textContent = option;
+    btn.addEventListener('click', () => {
+      overlay.remove();
+      if (onSelect) onSelect(option);
+    });
+    btnContainer.appendChild(btn);
+  }
+
+  // Miss button
+  const missBtn = document.createElement('button');
+  missBtn.className = 'btn btn-danger review-btn';
+  missBtn.textContent = 'Miss';
+  missBtn.addEventListener('click', () => {
+    overlay.remove();
+    if (onSelect) onSelect('MISS');
+  });
+  btnContainer.appendChild(missBtn);
+
+  dialog.appendChild(btnContainer);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
 }
