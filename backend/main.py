@@ -10,6 +10,7 @@ from backend.api.calibration import router as calibration_router
 from backend.api.cameras import router as cameras_router
 from backend.api.game import router as game_router
 from backend.api.profiles import router as profiles_router
+from backend.api.warp import router as warp_router
 from backend.api.websocket import router as ws_router
 
 # Loaded at startup; accessible via get_active_profile()
@@ -43,6 +44,7 @@ app.include_router(calibration_router)
 app.include_router(cameras_router)
 app.include_router(game_router)
 app.include_router(profiles_router)
+app.include_router(warp_router)
 app.include_router(ws_router)
 
 
