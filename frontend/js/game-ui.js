@@ -1,4 +1,4 @@
-import { drawBoard, drawHit, getScoreFromClick } from './board-canvas.js';
+import { drawBoard, drawHit, drawHits, getScoreFromClick } from './board-canvas.js';
 
 let totalScore = 0;
 const throws = [];
@@ -41,14 +41,34 @@ function handleThrow(canvas, event) {
   totalScore += result.score;
 
   const lastThrow = document.getElementById('last-throw');
-  lastThrow.textContent = `${result.field} → +${result.score}`;
+  lastThrow.textContent = `${result.field} \u2192 +${result.score}`;
 
+  animateScore(result.score, result.field);
   updateScoreDisplay();
   updateHistory();
 }
 
+export function animateScore(scoreValue, fieldName) {
+  const container = document.getElementById('score-popup-container');
+  if (!container) return;
+
+  const popup = document.createElement('div');
+  popup.className = 'score-popup';
+  popup.textContent = `+${scoreValue} ${fieldName}`;
+  container.appendChild(popup);
+
+  popup.addEventListener('animationend', () => {
+    popup.remove();
+  });
+}
+
 function updateScoreDisplay() {
-  document.getElementById('score-value').textContent = totalScore;
+  const el = document.getElementById('score-value');
+  el.textContent = totalScore;
+  el.classList.remove('score-pulse');
+  // Force reflow to restart animation
+  void el.offsetWidth;
+  el.classList.add('score-pulse');
 }
 
 function updateHistory() {

@@ -4,26 +4,24 @@
 2026-03-21
 
 ## Aktiver Branch
-feature/phase2-calibration
+feature/phase5-topdown-view
 
 ## Was wurde gemacht
-1. **Phase 1 MVP** komplett: FastAPI Backend (Game API, WebSocket, Pydantic Models) + Vanilla JS Frontend (Dartboard Canvas, Click-to-Score, Dark Theme) — 15 Tests
-2. **Phase 2 Calibration** komplett: CameraManager, ChArUco-Kalibrierung, ROI-Auswahl UI, Board-Fitting (Homographie) — 26 neue Tests (41 gesamt)
-3. **Entwicklungs-Infrastruktur**: CLAUDE.md, 5 Skills, 4 Agents, Task-Breakdown (10 Phasen, 34 Sub-Tasks)
-4. **Session-Hooks eingerichtet**: session-bootstrap.sh, phase-switch.sh, agentic-os Integration (.agent-memory)
-5. **PRs erstellt**: #1 (Phase 1), #2 (Phase 2)
+1. **Phase 1 MVP** komplett: FastAPI Backend + Vanilla JS Frontend — 15 Tests
+2. **Phase 2 Calibration** komplett: CameraManager, ChArUco, ROI, Board-Fitting — 26 neue Tests
+3. **Phase 3 Persistence** komplett: Profile CRUD API, JSON Store, Auto-Load via Lifespan — PR #3
+4. **Phase 5 Top-Down View** komplett: WarpEngine, Warp API, Confidence-Hit-Overlay, Score-Animationen — 12 neue Tests, PR #4
+5. **Infrastruktur**: CLAUDE.md, 5 Skills, 4 Agents, Session-Hooks, agentic-os
 
 ## Offene Arbeit (nicht committet)
-- Session-Hooks (session-bootstrap.sh, phase-switch.sh)
-- agentic-os Memory-Dateien (.agent-memory/)
-- settings.local.json Aktualisierung steht noch aus
+- .agent-memory/ Dateien (dieses Update)
 
 ## Nächste Schritte
-- settings.local.json mit SessionStart + PostToolUse:Bash Hooks finalisieren
-- Phase 3: Persistenz & Profilmanagement
-- Phase 4: Single-Cam Treffererkennung
+- Phase 6: Multiplayer & Spielmodi
+- Phase 4 (Index #6): Single-Cam Treffererkennung
+- PRs #3 und #4 mergen
 
 ## Qualität
-- 41/41 Tests bestanden
-- ruff check sauber
+- 64/64 Tests bestanden
+- ruff check + format sauber
 - Keine bekannten Bugs

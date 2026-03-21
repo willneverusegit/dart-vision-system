@@ -181,6 +181,67 @@ body {
   font-weight: 600;
 }
 
+/* Score popup animation */
+.score-popup-container {
+  position: relative;
+  height: 0;
+  overflow: visible;
+}
+
+.score-popup {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent-yellow);
+  pointer-events: none;
+  white-space: nowrap;
+  animation: scorePopup 1.5s ease-out forwards;
+}
+
+@keyframes scorePopup {
+  0% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-60px);
+  }
+}
+
+/* Score pulse */
+.score-pulse {
+  animation: scorePulse 0.3s ease-out;
+}
+
+@keyframes scorePulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Hit confidence colors */
+.hit-green {
+  color: #4ecca3;
+}
+
+.hit-yellow {
+  color: #f5c518;
+}
+
+.hit-red {
+  color: #e94560;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .game-layout {

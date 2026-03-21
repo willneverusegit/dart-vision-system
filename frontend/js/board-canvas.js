@@ -129,7 +129,13 @@ export function getScoreFromClick(canvas, event) {
   return { score: sectorValue, field: `${sectorValue}`, multiplier: 1 };
 }
 
-export function drawHit(canvas, event, field) {
+function getConfidenceColor(confidence) {
+  if (confidence >= 0.8) return '#4ecca3';
+  if (confidence >= 0.5) return '#f5c518';
+  return '#e94560';
+}
+
+export function drawHit(canvas, event, field, confidence = 1.0) {
   const ctx = canvas.getContext('2d');
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
@@ -138,10 +144,45 @@ export function drawHit(canvas, event, field) {
   const py = (event.clientY - rect.top) * scaleY;
 
   ctx.beginPath();
-  ctx.arc(px, py, 6, 0, 2 * Math.PI);
-  ctx.fillStyle = '#f5c518';
+  ctx.arc(px, py, 8, 0, 2 * Math.PI);
+  ctx.fillStyle = getConfidenceColor(confidence);
   ctx.fill();
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 2;
   ctx.stroke();
+
+  // Label
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(field, px, py - 12);
+}
+
+export function drawHits(canvas, hits) {
+  const ctx = canvas.getContext('2d');
+  const AGE_OPACITY = [1.0, 0.6, 0.3];
+
+  for (const hit of hits) {
+    const opacity = AGE_OPACITY[hit.age] ?? 0.3;
+    ctx.globalAlpha = opacity;
+
+    // Filled circle
+    ctx.beginPath();
+    ctx.arc(hit.x, hit.y, 8, 0, 2 * Math.PI);
+    ctx.fillStyle = getConfidenceColor(hit.confidence);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(hit.field, hit.x, hit.y - 12);
+  }
+
+  ctx.globalAlpha = 1.0;
 }
