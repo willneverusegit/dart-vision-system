@@ -20,7 +20,19 @@
     <!-- Setup Page -->
     <section id="page-setup" class="page">
       <h2>Setup</h2>
-      <p>Kamera-Auswahl und Profilverwaltung (coming soon)</p>
+      <div class="setup-section">
+        <h3>Profilverwaltung</h3>
+        <div class="profile-controls">
+          <select id="profile-select" class="select"></select>
+          <button id="btn-load-profile" class="btn">Laden</button>
+          <button id="btn-delete-profile" class="btn btn-danger">L\u00f6schen</button>
+        </div>
+        <div class="profile-save">
+          <input id="profile-name" type="text" class="input" placeholder="Profilname">
+          <button id="btn-save-profile" class="btn btn-primary">Speichern</button>
+        </div>
+        <div id="profile-status" class="status-msg"></div>
+      </div>
     </section>
 
     <!-- Calibration Page -->

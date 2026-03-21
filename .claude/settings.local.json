@@ -1,5 +1,10 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "command": "bash \"C:/Users/domes/OneDrive/Desktop/FREE_code/.claude/hooks/session-bootstrap.sh\" 2>/dev/null || true"
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Write",
@@ -10,6 +15,10 @@
       {
         "matcher": "Write",
         "command": "bash -c 'if [[ \"$TOOL_INPUT_FILE_PATH\" == backend/*.py ]]; then cd \"C:/Users/domes/OneDrive/Desktop/FREE_code\" && ruff check \"$TOOL_INPUT_FILE_PATH\" 2>/dev/null || echo \"ruff: issues found\"; fi'"
+      },
+      {
+        "matcher": "Bash",
+        "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -q \"git checkout\\|git switch\"; then bash \"C:/Users/domes/OneDrive/Desktop/FREE_code/.claude/hooks/phase-switch.sh\" 2>/dev/null || true; fi'"
       }
     ]
   },
@@ -18,7 +27,17 @@
       "Bash(ruff *)",
       "Bash(pytest *)",
       "Bash(python -m pytest *)",
-      "Bash(uvicorn *)"
+      "Bash(uvicorn *)",
+      "Bash(pip install:*)",
+      "Bash(ruff check:*)",
+      "Bash(python -m ruff check backend/)",
+      "Bash(python -m pytest backend/tests/test_models.py -v)",
+      "Bash(python -m pytest backend/tests/ -v)",
+      "Bash(python -m pytest backend/tests/ -v --tb=short)",
+      "Bash(gh pr:*)",
+      "Bash(python -m ruff check backend/ --fix)",
+      "Skill(claude-md-management:revise-claude-md)",
+      "Skill(claude-md-management:revise-claude-md:*)"
     ]
   }
 }

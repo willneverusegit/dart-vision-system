@@ -11,6 +11,7 @@ src = ["backend"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["N806"]  # Allow uppercase variable names (math convention: H, R, T, E, F)
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
