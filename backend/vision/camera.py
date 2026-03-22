@@ -105,5 +105,94 @@ class CameraManager:
             return (w, h)
 
 
+class DeviceWatcher:
+    """Watches for camera device changes (hot-plug/unplug).
+
+    Periodically probes device indices and fires callbacks when
+    cameras appear or disappear.
+    """
+
+    def __init__(
+        self,
+        manager: CameraManager,
+        max_check: int = 5,
+        interval: float = 3.0,
+        on_added: "callable[[CameraDevice], None] | None" = None,
+        on_removed: "callable[[int], None] | None" = None,
+    ) -> None:
+        self._manager = manager
+        self._max_check = max_check
+        self._interval = interval
+        self._on_added = on_added
+        self._on_removed = on_removed
+        self._known_indices: set[int] = set()
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+
+    def start(self) -> None:
+        """Start watching for device changes in a background thread."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        # Initialize known devices
+        devices = self._manager.list_devices(self._max_check)
+        self._known_indices = {d.index for d in devices}
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        logger.info("DeviceWatcher started. Known devices: %s", self._known_indices)
+
+    def stop(self) -> None:
+        """Stop the watcher thread."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval + 1)
+            self._thread = None
+        logger.info("DeviceWatcher stopped.")
+
+    @property
+    def is_running(self) -> bool:
+        """Check if the watcher is running."""
+        return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def known_indices(self) -> set[int]:
+        """Return the set of currently known device indices."""
+        return set(self._known_indices)
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            self._stop_event.wait(self._interval)
+            if self._stop_event.is_set():
+                break
+            self._poll()
+
+    def _poll(self) -> None:
+        """Probe devices and fire callbacks on changes."""
+        current_devices = self._manager.list_devices(self._max_check)
+        current_indices = {d.index for d in current_devices}
+        device_map = {d.index: d for d in current_devices}
+
+        added = current_indices - self._known_indices
+        removed = self._known_indices - current_indices
+
+        for idx in added:
+            logger.info("Camera %d appeared (hot-plug)", idx)
+            if self._on_added is not None:
+                try:
+                    self._on_added(device_map[idx])
+                except Exception:
+                    logger.exception("on_added callback failed for camera %d", idx)
+
+        for idx in removed:
+            logger.info("Camera %d disappeared (unplug)", idx)
+            if self._on_removed is not None:
+                try:
+                    self._on_removed(idx)
+                except Exception:
+                    logger.exception("on_removed callback failed for camera %d", idx)
+
+        self._known_indices = current_indices
+
+
 # Singleton instance
 camera_manager = CameraManager()
