@@ -3,13 +3,22 @@ import { drawBoard, drawHit, drawHits, getScoreFromClick } from './board-canvas.
 let totalScore = 0;
 const throws = [];
 const CONFIDENCE_REVIEW_THRESHOLD = 0.6;
+let debugMode = false;
 
 export function initGamePage() {
   const canvas = document.getElementById('dartboard');
   const btnStart = document.getElementById('btn-start-game');
   const btnStop = document.getElementById('btn-stop-game');
+  const btnDebug = document.getElementById('btn-toggle-debug');
 
   drawBoard(canvas);
+
+  if (btnDebug) {
+    btnDebug.addEventListener('click', () => {
+      const active = toggleDebugMode();
+      btnDebug.textContent = active ? 'Debug (AN)' : 'Debug';
+    });
+  }
 
   canvas.addEventListener('click', (e) => {
     if (!btnStop.disabled) {
@@ -162,4 +171,47 @@ export function showReviewDialog(field, alternatives, onSelect) {
   dialog.appendChild(btnContainer);
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
+}
+
+export function toggleDebugMode() {
+  debugMode = !debugMode;
+  const panel = document.getElementById('debug-panel');
+  if (panel) {
+    panel.style.display = debugMode ? 'grid' : 'none';
+  }
+  return debugMode;
+}
+
+export function showDebugThumbnails(debugOutput) {
+  if (!debugMode || !debugOutput) return;
+
+  const panel = document.getElementById('debug-panel');
+  if (!panel) return;
+  panel.replaceChildren();
+
+  const stages = [
+    { label: 'Grauwert', data: debugOutput.grayscale_b64 },
+    { label: 'Differenz', data: debugOutput.diff_b64 },
+    { label: 'Canny', data: debugOutput.canny_b64 },
+    { label: 'Konturen', data: debugOutput.contours_b64 },
+  ];
+
+  for (const stage of stages) {
+    if (!stage.data) continue;
+
+    const container = document.createElement('div');
+    container.className = 'debug-thumb';
+
+    const label = document.createElement('span');
+    label.className = 'debug-label';
+    label.textContent = stage.label;
+
+    const img = document.createElement('img');
+    img.src = `data:image/jpeg;base64,${stage.data}`;
+    img.alt = stage.label;
+
+    container.appendChild(label);
+    container.appendChild(img);
+    panel.appendChild(container);
+  }
 }
